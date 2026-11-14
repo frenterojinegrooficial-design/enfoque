@@ -26,6 +26,9 @@ input[type=range]{padding:0;accent-color:var(--ac);height:28px}
 button.rec{background:var(--rd)!important;color:#fff!important}
 .toast{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:10px;z-index:60;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;text-align:center}
 .toast.on{opacity:1}
+#rem{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:70;display:flex;flex-direction:column;gap:8px;width:min(92vw,420px)}
+.remc{background:var(--bg);color:var(--tx);border:1px solid var(--ac);border-radius:12px;padding:12px 14px;box-shadow:0 8px 30px #0005;display:flex;flex-direction:column;gap:2px}
+.remc small{color:var(--mu)}
 #app{display:grid;grid-template-columns:56px 240px minmax(0,1fr) 370px;height:100vh}
 #app.nolist{grid-template-columns:56px minmax(0,1fr)}
 #app.nolist #side,#app.nolist #detail{display:none}
@@ -188,17 +191,24 @@ function nextDue(due,rep){
 function toggle(t){
  if(!t.done){
   t.done=true;t.doneAt=today();
-  if(t.rep)S.tasks.push({...t,id:uid(),done:false,doneAt:null,pomos:0,due:nextDue(t.due||today(),t.rep),subs:t.subs.map(s=>({...s,done:false}))});
+  if(t.rep)S.tasks.push({...t,id:uid(),done:false,doneAt:null,pomos:0,spentS:0,remDone:false,snz:0,due:nextDue(t.due||today(),t.rep),subs:t.subs.map(s=>({...s,done:false}))});
  }else{t.done=false;t.doneAt=null}
 }
 function addTask(raw,o){
  let txt=raw.trim();if(!txt)return false;
  const tags=[];txt=txt.replace(/(^|\s)#([\p{L}\d_-]+)/gu,(m,a,w)=>{tags.push(w);return a}).trim();
- let due=o.due||'';
+ let due=o.due||'',time='';
+ {const P=[/\s+a las?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?:\s+de la\s+(tarde|noche|mañana|madrugada))?$/i,/\s+(\d{1,2}):(\d{2})\s*(am|pm)?$/i,/\s+(\d{1,2})\s*(am|pm)$/i];
+  for(let i=0;i<3&&!time;i++){const m=txt.match(P[i]);if(!m)continue;
+   let h=+m[1];const mi=i<2?+(m[2]||0):0,mer=((i===0?(m[3]||m[4]):i===1?m[3]:m[2])||'').toLowerCase();
+   if(/pm|tarde|noche/.test(mer)&&h<12)h+=12;else if(/^(am|mañana|madrugada)$/.test(mer)&&h===12)h=0;
+   if(h<24&&mi<60){time=pad(h)+':'+pad(mi);txt=txt.slice(0,m.index).trim()}}}
  if(/\s(hoy)$/i.test(txt)){due=today();txt=txt.replace(/\s+hoy$/i,'')}
  else if(/\s(mañana)$/i.test(txt)){due=addDays(today(),1);txt=txt.replace(/\s+mañana$/i,'')}
  txt=txt.trim();if(!txt)return false;
- const x={id:uid(),t:txt,notes:'',list:o.list||'inbox',tags,p:+o.p||0,due,rep:'',done:false,doneAt:null,subs:[],pomos:0};
+ if(time&&!due)due=today();
+ const x={id:uid(),t:txt,notes:'',list:o.list||'inbox',tags,p:+o.p||0,due,rep:'',done:false,doneAt:null,subs:[],pomos:0,est:0,spentS:0,time,rem:time?0:-1,remDone:false,snz:0};
+ if(time){armRem(x);askNotif()}
  S.tasks.push(x);save();return x;
 }
 function filterFor(v){
@@ -215,7 +225,7 @@ function groups(open){
  return [['Vencidas',x=>x.due&&x.due<t,'late'],['Hoy',x=>x.due===t],['Mañana',x=>x.due===tm],['Próximos 7 días',x=>x.due>tm&&x.due<=w],['Más adelante',x=>x.due>w],['Sin fecha',x=>!x.due]]
   .map(([n,f,c])=>({n,c,items:open.filter(f)})).filter(g=>g.items.length);
 }
-const sortT=(a,b)=>(a.due||'9').localeCompare(b.due||'9')||b.p-a.p;
+const sortT=(a,b)=>(a.due||'9').localeCompare(b.due||'9')||(a.time||'99').localeCompare(b.time||'99')||b.p-a.p;
 
 // ---------- barra de iconos y panel
 function renderRail(){
@@ -243,7 +253,7 @@ function taskRow(x,showList=true){
  return `<div class="tr ${x.done?'dn':''} ${sel?'sel':''}" data-act="open" data-id="${x.id}">
  <span class="cb p${x.p} ${x.done?'on':''}" data-act="chk" data-id="${x.id}"></span>
  <span class="ttl">${esc(x.t)}</span>
- <span class="mt">${x.subs.length?`<span>☑ ${sd}/${x.subs.length}</span>`:''}${x.pomos?`<span>🍅${x.pomos}</span>`:''}${(x.est||x.spentS||(S.timer&&S.timer.id===x.id))?`<span>⏱ ${fmtD(spentNow(x))}${x.est?' / '+x.est+' min':''}${S.timer&&S.timer.id===x.id?' ▶':''}</span>`:''}${x.tags.map(g=>`<span class="tg">#${esc(g)}</span>`).join('')}${showList&&x.list!=='inbox'?`<span class="lst">${esc(l.name)}</span>`:''}${x.due?`<span class="dt ${dc}">${label(x.due)}${x.rep?' ↻':''}</span>`:''}</span></div>`;
+ <span class="mt">${x.subs.length?`<span>☑ ${sd}/${x.subs.length}</span>`:''}${x.pomos?`<span>🍅${x.pomos}</span>`:''}${(x.est||x.spentS||(S.timer&&S.timer.id===x.id))?`<span>⏱ ${fmtD(spentNow(x))}${x.est?' / '+x.est+' min':''}${S.timer&&S.timer.id===x.id?' ▶':''}</span>`:''}${x.tags.map(g=>`<span class="tg">#${esc(g)}</span>`).join('')}${showList&&x.list!=='inbox'?`<span class="lst">${esc(l.name)}</span>`:''}${x.due?`<span class="dt ${dc}">${label(x.due)}${x.time?' '+x.time:''}${x.time&&(x.rem??-1)>=0?' 🔔':''}${x.rep?' ↻':''}</span>`:''}</span></div>`;
 }
 const TITLES={hoy:'Hoy',man:'Mañana',prox:'Próximos 7 días',todas:'Todas'};
 function renderTasks(){
@@ -389,6 +399,57 @@ const spentNow=x=>(x.spentS||0)+(S.timer&&S.timer.id===x.id?Math.round((Date.now
 function tstop(){if(!S.timer)return;const x=S.tasks.find(z=>z.id===S.timer.id);if(x)x.spentS=(x.spentS||0)+Math.round((Date.now()-S.timer.start)/1000);S.timer=null;save()}
 function tstart(id){tstop();S.timer={id,start:Date.now()};save()}
 
+// ---------- recordatorios con hora
+function remTarget(x){
+ if(x.done||!x.due||!x.time||(x.rem??-1)<0||x.remDone)return null;
+ if(x.snz)return x.snz;
+ const d=pd(x.due),[h,m]=x.time.split(':').map(Number);d.setHours(h,m,0,0);
+ return d.getTime()-x.rem*60000;
+}
+// Al fijar la hora, si el aviso ya quedó en el pasado no suena de golpe.
+function armRem(x){x.remDone=false;x.snz=0;const t=remTarget(x);if(t!=null&&t<=Date.now())x.remDone=true}
+function askNotif(){try{if('Notification' in window&&Notification.permission==='default')Notification.requestPermission().then(()=>{})}catch(e){}}
+function checkRem(){
+ const now=Date.now(),fired=[];
+ S.tasks.forEach(x=>{const t=remTarget(x);if(t!=null&&now>=t){x.remDone=true;x.snz=0;fired.push(x)}});
+ if(fired.length){save();fired.forEach(notifyTask);renderMain();renderSide()}
+}
+function remWhen(x){const r=x.rem||0;return r<=0?'ahora':r>=1440?'mañana':'en '+(r>=60?(r/60)+' h':r+' min')}
+function notifyTask(x){
+ showRemCard(x);sfx('alarm',true);
+ if(navigator.vibrate)navigator.vibrate([250,120,250,120,250]);
+ if(!('Notification' in window)||Notification.permission!=='granted')return;
+ const opts={body:(x.rem>0?'Empieza '+remWhen(x)+' · ':'')+(x.time||''),icon:'icon.svg',badge:'icon.svg',tag:'rem-'+x.id,vibrate:[250,120,250],requireInteraction:true,data:{id:x.id}};
+ const fallback=()=>{try{new Notification('⏰ '+x.t,opts)}catch(e){}};
+ if(navigator.serviceWorker&&navigator.serviceWorker.ready)navigator.serviceWorker.ready.then(r=>r.showNotification('⏰ '+x.t,opts)).catch(fallback);else fallback();
+}
+function showRemCard(x){
+ let box=$('#rem');if(!box){box=document.createElement('div');box.id='rem';document.body.appendChild(box)}
+ if(box.querySelector(`.remc[data-id="${x.id}"]`))return;
+ const c=document.createElement('div');c.className='remc';c.dataset.id=x.id;
+ c.innerHTML=`<b>⏰ ${esc(x.t)}</b><small>${esc(x.time||'')} · ${remWhen(x)==='ahora'?'es ahora':'empieza '+remWhen(x)}</small>
+ <div class="row" style="margin-top:8px"><button data-act="remdone" data-id="${x.id}">Hecho</button><button class="o" data-act="remsnz" data-id="${x.id}">Posponer 10 min</button><button class="g" data-act="remx" data-id="${x.id}">Cerrar</button></div>`;
+ box.appendChild(c);
+}
+function remClose(id){const c=document.querySelector(`.remc[data-id="${id}"]`);if(c)c.remove()}
+// Calendario (.ics): el aviso lo da el calendario del teléfono, aunque Enfoque esté cerrada
+function icsEsc(s){return String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n')}
+function icsDT(d){return d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'T'+pad(d.getHours())+pad(d.getMinutes())+'00'}
+function icsFor(list){
+ const L=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Enfoque//ES','CALSCALE:GREGORIAN'],stamp=new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+/,'');
+ list.forEach(x=>{
+  const [h,m]=(x.time||'09:00').split(':').map(Number),s=pd(x.due);s.setHours(h,m,0,0);const e=new Date(s.getTime()+(x.est||30)*60000);
+  L.push('BEGIN:VEVENT','UID:'+x.id+'@enfoque','DTSTAMP:'+stamp,'DTSTART:'+icsDT(s),'DTEND:'+icsDT(e),'SUMMARY:'+icsEsc(x.t));
+  if(x.notes)L.push('DESCRIPTION:'+icsEsc(x.notes));
+  const rr={d:'FREQ=DAILY',w:'FREQ=WEEKLY',wd:'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',m:'FREQ=MONTHLY',y:'FREQ=YEARLY'}[x.rep];if(rr)L.push('RRULE:'+rr);
+  L.push('BEGIN:VALARM','TRIGGER:-PT'+Math.max(0,x.rem??0)+'M','ACTION:DISPLAY','DESCRIPTION:'+icsEsc(x.t),'END:VALARM','END:VEVENT');
+ });
+ L.push('END:VCALENDAR');return L.join('\r\n');
+}
+function icsDownload(list,name){
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([icsFor(list)],{type:'text/calendar'}));a.download=name;document.body.appendChild(a);a.click();a.remove();
+}
+
 // ---------- dictado por voz
 let rec=null;
 function mic(btn,forId){
@@ -415,6 +476,9 @@ function detailHTML(x,modal){
  <textarea id="en" placeholder="Descripción">${esc(x.notes)}</textarea>
  ${x.subs.map((s,i)=>`<div class="sub ${s.done?'dn':''}"><span class="cb ${s.done?'on':''}" data-act="subchk" data-i="${i}"></span><span>${esc(s.t)}</span><button class="g" data-act="subdel" data-i="${i}">✕</button></div>`).join('')}
  <div class="addbar" style="margin:8px 0 0">${ic('plus',16)}<input id="sn" placeholder="Añadir subtarea" style="padding:7px 4px"><button class="o" data-act="go" data-for="sn">＋</button></div>
+ <div class="df" style="margin-top:12px"><span style="color:var(--mu)">⏰ Hora</span><input id="eh" type="time" value="${x.time||''}" style="flex:none;width:118px;min-width:0">
+ <select id="eb" ${x.time?'':'disabled'} title="Cuándo avisarte" style="flex:1;min-width:120px;max-width:none">${[[-1,'Sin recordatorio'],[0,'A la hora'],[5,'5 min antes'],[10,'10 min antes'],[30,'30 min antes'],[60,'1 hora antes'],[1440,'1 día antes']].map(([k,n])=>`<option value="${k}" ${k===(x.rem??-1)?'selected':''}>${n}</option>`).join('')}</select>
+ <button class="o" data-act="ics" title="Añadir a Google Calendar o al calendario del teléfono (suena aunque la app esté cerrada)">📅 Calendario</button></div>
  <div class="df" style="margin-top:12px"><span style="color:var(--mu)">⏱ Estimado</span><input id="ee" type="number" min="0" step="5" value="${x.est||''}" placeholder="min" style="flex:none;width:80px;min-width:0">
  <span style="color:var(--mu)">Real: <b id="rt" data-id="${x.id}" style="color:var(--tx)">${fmtD(spentNow(x))}</b></span>
  <button class="${S.timer&&S.timer.id===x.id?'d':'o'}" data-act="tstart">${S.timer&&S.timer.id===x.id?'■ Detener':'▶ Cronómetro'}</button></div>
@@ -451,9 +515,12 @@ function settings(){
  <label class="l">Tema</label><div class="row">${[['auto','Automático'],['light','Claro'],['dark','Oscuro']].map(([k,n])=>`<button class="${S.theme===k?'':'o'}" data-act="theme" data-k="${k}">${n}</button>`).join('')}</div>
  <label class="l">Sonidos al completar y añadir tareas</label><div class="row"><button class="${S.cfg.sfx===false?'o':''}" data-act="sfx" data-k="on">Activados</button><button class="${S.cfg.sfx===false?'':'o'}" data-act="sfx" data-k="off">Silenciados</button></div>
  <div class="row" style="margin-top:8px"><button class="o" data-act="sfxtest">Probar sonido</button></div>
+ <label class="l">Avisos de recordatorios: ${!('Notification' in window)?'no disponibles en este navegador':{granted:'activados',denied:'bloqueados (actívalos en los ajustes del sitio del navegador)',default:'sin activar'}[Notification.permission]}</label>
+ <div class="row"><button class="${'Notification' in window&&Notification.permission==='granted'?'o':''}" data-act="notif">Activar avisos</button><button class="o" data-act="notiftest">Probar aviso</button><button class="o" data-act="icsall">📅 Todo al calendario</button></div>
+ <p style="color:var(--mu);font-size:12px;margin-top:6px">Los avisos suenan con Enfoque abierta o en segundo plano. Para que te avisen con la app cerrada, usa «Calendario»: el aviso lo da el calendario de tu teléfono.</p>
  <label class="l">Copia de seguridad</label><div class="row"><button class="o" data-act="export">Exportar</button><button class="o" data-act="import">Importar</button></div>
  <input type="file" id="imp" accept=".json" style="display:none">
- <p style="color:var(--mu);font-size:11px;margin-top:14px">Versión 7 · voz, compartir, plantillas y tiempo real</p>
+ <p style="color:var(--mu);font-size:11px;margin-top:14px">Versión 8 · recordatorios con hora</p>
  <div class="row" style="justify-content:flex-end;margin-top:16px"><button data-act="close">Cerrar</button></div></div>`;
  $('#modal').classList.add('on');
 }
@@ -490,6 +557,13 @@ document.addEventListener('click',e=>{
  else if(a==='hdel'){if(confirm('¿Eliminar hábito?')){S.habits=S.habits.filter(h=>h.id!==id);save();renderMain()}}
  else if(a==='hday'){const h=S.habits.find(h=>h.id===id),d=el.dataset.d;h.days=h.days.includes(d)?h.days.filter(z=>z!==d):[...h.days,d];save();renderMain()}
  else if(a==='close')closeModal();
+ else if(a==='ics'){const x=task();if(!x.due||!x.time){toast('Ponle fecha y hora primero');return}icsDownload([x],'enfoque-tarea.ics');toast('Abre el archivo descargado para añadirlo a tu calendario')}
+ else if(a==='icsall'){const l=S.tasks.filter(x=>!x.done&&x.due&&x.time);if(!l.length){toast('No hay tareas pendientes con fecha y hora');return}icsDownload(l,'enfoque-recordatorios.ics');toast(l.length+' tareas exportadas al calendario')}
+ else if(a==='notif'){try{Notification.requestPermission().then(()=>settings())}catch(e){toast('Este navegador no permite avisos')}}
+ else if(a==='notiftest'){notifyTask({id:'prueba',t:'Aviso de prueba',time:'ahora',rem:0,notes:''})}
+ else if(a==='remdone'){const x=S.tasks.find(z=>z.id===id);if(x&&!x.done){toggle(x);sfx('done');save();render()}remClose(id)}
+ else if(a==='remsnz'){const x=S.tasks.find(z=>z.id===id);if(x){x.snz=Date.now()+10*60000;x.remDone=false;save();toast('Te aviso de nuevo en 10 minutos')}remClose(id)}
+ else if(a==='remx')remClose(id);
  else if(a==='mic')mic(el,el.dataset.for);
  else if(a==='tpledit')tplEdit(id);
  else if(a==='tpluse')tplUse(id);
@@ -505,7 +579,9 @@ document.addEventListener('click',e=>{
 });
 const FIELDS={
  ee:(x,v)=>{x.est=Math.max(0,Math.round(+v||0))},
- et:(x,v)=>{x.t=v.trim()||x.t},en:(x,v)=>{x.notes=v},el:(x,v)=>{x.list=v},ep:(x,v)=>{x.p=+v},ed:(x,v)=>{x.due=v},er:(x,v)=>{x.rep=v},
+ et:(x,v)=>{x.t=v.trim()||x.t},en:(x,v)=>{x.notes=v},el:(x,v)=>{x.list=v},ep:(x,v)=>{x.p=+v},ed:(x,v)=>{x.due=v;armRem(x)},
+ eh:(x,v)=>{x.time=v;if(v&&!x.due)x.due=today();if(v&&(x.rem==null||x.rem<0))x.rem=0;if(!v)x.rem=-1;armRem(x);if(v)askNotif()},
+ eb:(x,v)=>{x.rem=+v;armRem(x);if(+v>=0)askNotif()},er:(x,v)=>{x.rep=v},
  eg:(x,v)=>{x.tags=v.split(/[\s,]+/).map(s=>s.replace(/^#/,'').trim()).filter(Boolean)}
 };
 document.addEventListener('input',e=>{
@@ -588,10 +664,10 @@ function tone(notes,dur){
  return wavUrl(a,rate);
 }
 const SFX={};
-function sfx(k){
- if(S.cfg.sfx===false)return;
+function sfx(k,force){
+ if(S.cfg.sfx===false&&!force)return;
  try{
-  if(!SFX.done){SFX.done=new Audio(tone([[659.25,0],[880,.1],[1318.5,.2]],.75));SFX.add=new Audio(tone([[587.33,0],[783.99,.07]],.45))}
+  if(!SFX.done){SFX.done=new Audio(tone([[659.25,0],[880,.1],[1318.5,.2]],.75));SFX.add=new Audio(tone([[587.33,0],[783.99,.07]],.45));SFX.alarm=new Audio(tone([[880,0],[1108.7,.16],[880,.34],[1108.7,.5]],1.0))}
   const a=SFX[k];a.volume=1;a.currentTime=0;const p=a.play();if(p&&p.catch)p.catch(()=>{});
  }catch(e){}
  if(k==='done'&&navigator.vibrate)navigator.vibrate(35);
@@ -601,11 +677,16 @@ addEventListener('resize',()=>{const w=wide();if(w!==lastWide){lastWide=w;render
 function toast(m){let t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';document.body.appendChild(t)}t.textContent=m;t.className='toast on';clearTimeout(toast.h);toast.h=setTimeout(()=>{t.className='toast'},2800)}
 setInterval(()=>{const e=$('#rt');if(e){const x=S.tasks.find(z=>z.id===e.dataset.id);if(x)e.textContent=fmtD(spentNow(x))}},1000);
 if(S.timer&&!S.tasks.some(z=>z.id===S.timer.id))S.timer=null;
+setInterval(checkRem,15000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkRem()});
+setTimeout(checkRem,800);
+if(navigator.serviceWorker)navigator.serviceWorker.addEventListener('message',e=>{const id=e.data&&e.data.open;if(id&&S.tasks.some(z=>z.id===id)){ui.view=ui.lastTV='todas';ui.sel=id;render();openTask(id)}});
 document.documentElement.dataset.t=S.theme;
 render();
 // Compartir a Enfoque: llega por la dirección (?title=&text=&url=) cuando otra app comparte con la app instalada
 (function(){
- const q=new URLSearchParams(location.search),ti=q.get('title')||'',tx=q.get('text')||'',u=q.get('url')||'';
+ const q=new URLSearchParams(location.search),ti=q.get('title')||'',tx=q.get('text')||'',u=q.get('url')||'',tid=q.get('task');
+ if(tid){try{history.replaceState(null,'',location.pathname)}catch(e){}if(S.tasks.some(z=>z.id===tid)){ui.view=ui.lastTV='todas';ui.sel=tid;render();openTask(tid)}return}
  if(!(ti||tx||u))return;
  const body=[tx,u].filter(Boolean).join('\n').trim();let t=(ti||tx||u).split('\n')[0].trim();if(t.length>120)t=t.slice(0,117)+'…';
  const x={id:uid(),t,notes:body===t?'':body,list:'inbox',tags:[],p:0,due:'',rep:'',done:false,doneAt:null,subs:[],pomos:0,est:0,spentS:0};

@@ -1,4 +1,4 @@
-const C = 'enfoque-v4';
+const C = 'enfoque-v5';
 const F = ['./', './index.html', './manifest.json', './icon.svg'];
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(C).then(c => c.addAll(F.map(u => new Request(u, { cache: 'reload' }))))); });
 self.addEventListener('activate', e => e.waitUntil(
@@ -12,4 +12,15 @@ self.addEventListener('fetch', e => {
       .then(r => { const cp = r.clone(); caches.open(C).then(c => c.put(e.request, cp)); return r; })
       .catch(() => caches.match(e.request))
   );
+});
+// Al tocar un aviso de recordatorio: abre Enfoque y muestra esa tarea.
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const id = e.notification.data && e.notification.data.id;
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) {
+      if ('focus' in c) { if (id) c.postMessage({ open: id }); return c.focus(); }
+    }
+    return clients.openWindow('./index.html' + (id ? '?task=' + encodeURIComponent(id) : ''));
+  }));
 });
