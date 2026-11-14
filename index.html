@@ -457,7 +457,8 @@ document.addEventListener('keydown',e=>{
  }
  if(e.key==='Escape'&&$('#modal').classList.contains('on'))closeModal();
 });
-addEventListener('resize',()=>{renderMain();renderDetail()});
+let lastWide=wide();
+addEventListener('resize',()=>{const w=wide();if(w!==lastWide){lastWide=w;renderMain();renderDetail()}});
 document.documentElement.dataset.t=S.theme;
 render();
 if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
