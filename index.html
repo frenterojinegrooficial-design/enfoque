@@ -386,6 +386,7 @@ function render(){
 function settings(){
  $('#modal').innerHTML=`<div class="box"><h1 style="font-size:18px;margin-bottom:12px">Ajustes</h1>
  <label class="l">Tema</label><div class="row">${[['auto','Automático'],['light','Claro'],['dark','Oscuro']].map(([k,n])=>`<button class="${S.theme===k?'':'o'}" data-act="theme" data-k="${k}">${n}</button>`).join('')}</div>
+ <label class="l">Sonidos al completar y añadir tareas</label><div class="row"><button class="${S.cfg.sfx===false?'o':''}" data-act="sfx" data-k="on">Activados</button><button class="${S.cfg.sfx===false?'':'o'}" data-act="sfx" data-k="off">Silenciados</button></div>
  <label class="l">Copia de seguridad</label><div class="row"><button class="o" data-act="export">Exportar</button><button class="o" data-act="import">Importar</button></div>
  <input type="file" id="imp" accept=".json" style="display:none">
  <div class="row" style="justify-content:flex-end;margin-top:16px"><button data-act="close">Cerrar</button></div></div>`;
@@ -403,7 +404,8 @@ document.addEventListener('click',e=>{
  else if(a==='rail'){const v=el.dataset.v;ui.view=v==='tasks'?ui.lastTV:v;ui.drawer=false;render()}
  else if(a==='nav'){ui.view=ui.lastTV=el.dataset.v;ui.drawer=false;ui.sel=null;render()}
  else if(a==='drawer'){ui.drawer=!ui.drawer;renderSide()}
- else if(a==='chk'){toggle(task());save();if(ui.edit)refreshDetail();else render()}
+ else if(a==='chk'){const t=task(),was=t.done;toggle(t);if(!was)sfx('done');save();if(ui.edit)refreshDetail();else render()}
+ else if(a==='sfx'){S.cfg.sfx=el.dataset.k==='on';save();if(S.cfg.sfx)sfx('done');settings()}
  else if(a==='open')openTask(id);
  else if(a==='grp'){const g=el.dataset.g;ui.collapsed[g]=!ui.collapsed[g];renderMain()}
  else if(a==='showdone'){ui.showDone=!ui.showDone;renderMain()}
@@ -424,7 +426,7 @@ document.addEventListener('click',e=>{
  else if(a==='close')closeModal();
  else if(a==='del'){if(confirm('¿Eliminar la tarea?')){S.tasks=S.tasks.filter(z=>z.id!==curId());ui.sel=null;save();if(ui.edit)closeModal();else render()}}
  else if(a==='tofoco'){T.task=curId();ui.edit=null;$('#modal').classList.remove('on');ui.view='foco';render()}
- else if(a==='subchk'){const x=task();x.subs[+el.dataset.i].done=!x.subs[+el.dataset.i].done;save();refreshDetail()}
+ else if(a==='subchk'){const x=task(),s=x.subs[+el.dataset.i];s.done=!s.done;if(s.done)sfx('done');save();refreshDetail()}
  else if(a==='subdel'){const x=task();x.subs.splice(+el.dataset.i,1);save();refreshDetail()}
 });
 const FIELDS={
@@ -454,7 +456,7 @@ document.addEventListener('change',e=>{
 document.addEventListener('keydown',e=>{
  const id=e.target.id;
  if(e.key==='Enter'||e.keyCode===13){
-  if(id==='nt'){const x=addTask(e.target.value,{list:e.target.dataset.l,p:$('#np').value,due:$('#nd').value});if(x){ui.collapsed={};render();$('#nt').focus()}}
+  if(id==='nt'){const x=addTask(e.target.value,{list:e.target.dataset.l,p:$('#np').value,due:$('#nd').value});if(x){sfx('add');ui.collapsed={};render();$('#nt').focus()}}
   else if(id==='cn'){if(addTask(e.target.value,{due:ui.cal.sel})){render();$('#cn').focus()}}
   else if(id==='hn'){const t=e.target.value.trim();if(t){S.habits.push({id:uid(),t,days:[]});save();renderMain();$('#hn').focus()}}
   else if(id==='sn'){const x=S.tasks.find(z=>z.id===curId()),v=e.target.value.trim();if(x&&v){x.subs.push({t:v,done:false});save();refreshDetail();$('#sn').focus()}}
@@ -494,6 +496,20 @@ function playSound(k){
  else if(k==='olas'){src.buffer=mkNoise(c,'marron');const g=c.createGain();g.gain.value=.45;lfo(.12,.35,g.gain);chain(filt('lowpass',800),g,out)}
  else if(k==='viento'){src.buffer=mkNoise(c,'rosa');const bp=filt('bandpass',600,.7);lfo(.08,350,bp.frequency);chain(bp,out)}
  src.start();SND.nodes=nodes;SND.cur=k;
+}
+// efectos cortos: "ding" al completar, "pop" al añadir
+function sfx(k){
+ if(S.cfg.sfx===false)return;
+ const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
+ if(!SND.ctx)SND.ctx=new AC();
+ const c=SND.ctx;if(c.resume)c.resume();
+ const notes=k==='done'?[[659.25,0],[880,.09],[1318.5,.18]]:[[523.25,0]];
+ notes.forEach(([f,t])=>{
+  const o=c.createOscillator(),g=c.createGain(),s=c.currentTime+t;
+  o.type='sine';o.frequency.value=f;
+  g.gain.setValueAtTime(0,s);g.gain.linearRampToValueAtTime(.18,s+.01);g.gain.exponentialRampToValueAtTime(.001,s+.35);
+  o.connect(g);g.connect(c.destination);o.start(s);o.stop(s+.4);
+ });
 }
 let lastWide=wide();
 addEventListener('resize',()=>{const w=wide();if(w!==lastWide){lastWide=w;renderMain();renderDetail()}});
