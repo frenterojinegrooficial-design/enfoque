@@ -22,6 +22,7 @@ button.g{background:transparent;color:var(--mu);padding:6px 8px}button.g:hover{b
 button.o{background:var(--inp);color:var(--tx)}
 button.d{background:var(--rd)}
 svg{display:block}
+input[type=range]{padding:0;accent-color:var(--ac);height:28px}
 #app{display:grid;grid-template-columns:56px 240px minmax(0,1fr) 370px;height:100vh}
 #app.nolist{grid-template-columns:56px minmax(0,1fr)}
 #app.nolist #side,#app.nolist #detail{display:none}
@@ -304,6 +305,8 @@ function renderFoco(){
  <label class="l">Tarea en la que trabajas</label>
  <select id="ft" data-act="ftask"><option value="">— Sin tarea —</option>${open.map(x=>`<option value="${x.id}" ${x.id===T.task?'selected':''}>${esc(x.t)}</option>`).join('')}</select>
  <div class="row" style="margin-top:12px">${['work','short','long'].map(k=>`<div class="f"><label class="l">${{work:'Trabajo',short:'Pausa',long:'Larga'}[k]} (min)</label><input type="number" min="1" max="120" value="${S.cfg[k]}" data-act="cfg" data-k="${k}"></div>`).join('')}</div></div>
+ <div class="card"><b>Sonido de fondo</b><div class="modes" style="justify-content:flex-start;margin-top:10px">${[['','Silencio'],['lluvia','Lluvia'],['olas','Olas'],['viento','Viento'],['blanco','Ruido blanco'],['marron','Ruido marrón']].map(([k,n])=>`<button data-act="snd" data-k="${k}" class="${SND.cur===k?'on':''}">${n}</button>`).join('')}</div>
+ <label class="l">Volumen</label><input id="vol" type="range" min="0" max="1" step="0.05" value="${S.cfg.vol??0.5}"></div>
  <div class="card grid3"><div><b>${ts.length}</b><small>Sesiones hoy</small></div><div><b>${ts.reduce((a,b)=>a+b.min,0)}</b><small>Min. hoy</small></div><div><b>${S.sess.length}</b><small>Sesiones totales</small></div></div></div>`;
 }
 
@@ -396,6 +399,7 @@ document.addEventListener('click',e=>{
  const a=el.dataset.act,id=el.dataset.id;
  const task=()=>S.tasks.find(z=>z.id===(id||curId()));
  if(a==='go'){const i=$('#'+el.dataset.for);if(i)i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))}
+ else if(a==='snd'){playSound(el.dataset.k);renderMain()}
  else if(a==='rail'){const v=el.dataset.v;ui.view=v==='tasks'?ui.lastTV:v;ui.drawer=false;render()}
  else if(a==='nav'){ui.view=ui.lastTV=el.dataset.v;ui.drawer=false;ui.sel=null;render()}
  else if(a==='drawer'){ui.drawer=!ui.drawer;renderSide()}
@@ -429,6 +433,7 @@ const FIELDS={
 };
 document.addEventListener('input',e=>{
  const id=e.target.id;
+ if(id==='vol'){const v=+e.target.value;S.cfg.vol=v;save();if(SND.out)SND.out.gain.value=v*(SND.boost||1)}
  if(id==='et'||id==='en'){
   const x=S.tasks.find(z=>z.id===curId());if(!x)return;FIELDS[id](x,e.target.value);save();
   const r=document.querySelector(`.tr[data-id="${x.id}"] .ttl`);if(r&&id==='et')r.textContent=x.t;
@@ -457,6 +462,39 @@ document.addEventListener('keydown',e=>{
  }
  if(e.key==='Escape'&&$('#modal').classList.contains('on'))closeModal();
 });
+// ---------- sonidos de fondo (generados con Web Audio, sin archivos)
+const SND={ctx:null,nodes:[],out:null,cur:'',boost:1};
+function mkNoise(c,type){
+ const n=c.sampleRate*6,b=c.createBuffer(1,n,c.sampleRate),d=b.getChannelData(0);
+ let l=0,b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+ for(let i=0;i<n;i++){
+  const w=Math.random()*2-1;
+  if(type==='marron'){l=(l+0.02*w)/1.02;d[i]=l*3.5}
+  else if(type==='rosa'){b0=.99886*b0+w*.0555179;b1=.99332*b1+w*.0750759;b2=.969*b2+w*.153852;b3=.8665*b3+w*.3104856;b4=.55*b4+w*.5329522;b5=-.7616*b5-w*.016898;d[i]=(b0+b1+b2+b3+b4+b5+b6+w*.5362)*.11;b6=w*.115926}
+  else d[i]=w*.5;
+ }
+ return b;
+}
+function stopSound(){SND.nodes.forEach(n=>{try{if(n.stop)n.stop();n.disconnect()}catch(e){}});SND.nodes=[];SND.cur=''}
+function playSound(k){
+ stopSound();if(!k)return;
+ const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
+ if(!SND.ctx)SND.ctx=new AC();
+ const c=SND.ctx;if(c.resume)c.resume();
+ SND.boost={lluvia:1,olas:1.3,viento:2.5,blanco:.6,marron:.9}[k]||1;
+ const out=c.createGain();out.gain.value=(S.cfg.vol??.5)*SND.boost;out.connect(c.destination);SND.out=out;
+ const src=c.createBufferSource();src.loop=true;
+ const nodes=[src,out];let last=src;
+ const chain=(...ns)=>ns.forEach(n=>{last.connect(n);last=n;nodes.push(n)});
+ const lfo=(freq,depth,param)=>{const o=c.createOscillator(),g=c.createGain();o.frequency.value=freq;g.gain.value=depth;o.connect(g);g.connect(param);o.start();nodes.push(o,g)};
+ const filt=(type,f,q)=>{const x=c.createBiquadFilter();x.type=type;x.frequency.value=f;if(q)x.Q.value=q;return x};
+ if(k==='blanco'){src.buffer=mkNoise(c,'blanco');chain(out)}
+ else if(k==='marron'){src.buffer=mkNoise(c,'marron');chain(out)}
+ else if(k==='lluvia'){src.buffer=mkNoise(c,'rosa');chain(filt('highpass',500),filt('lowpass',8000),out)}
+ else if(k==='olas'){src.buffer=mkNoise(c,'marron');const g=c.createGain();g.gain.value=.45;lfo(.12,.35,g.gain);chain(filt('lowpass',800),g,out)}
+ else if(k==='viento'){src.buffer=mkNoise(c,'rosa');const bp=filt('bandpass',600,.7);lfo(.08,350,bp.frequency);chain(bp,out)}
+ src.start();SND.nodes=nodes;SND.cur=k;
+}
 let lastWide=wide();
 addEventListener('resize',()=>{const w=wide();if(w!==lastWide){lastWide=w;renderMain();renderDetail()}});
 document.documentElement.dataset.t=S.theme;
