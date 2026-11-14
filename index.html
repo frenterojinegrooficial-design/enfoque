@@ -490,6 +490,7 @@ function checkRem(){
 function remWhen(x){const r=x.rem||0;return r<=0?'ahora':r>=1440?'mañana':'en '+(r>=60?(r/60)+' h':r+' min')}
 function notifyTask(x){
  showRemCard(x);sfx('alarm',true);
+ if(talkMode()!=='off')setTimeout(()=>speak('Recordatorio: '+x.t+(x.rem>0?'. Empieza '+relSpoken(remWhen(x)):'. Es ahora')),1100);
  if(navigator.vibrate)navigator.vibrate([250,120,250,120,250]);
  if(!('Notification' in window)||Notification.permission!=='granted')return;
  const opts={body:(x.rem>0?'Empieza '+remWhen(x)+' · ':'')+(x.time||''),icon:'icon.svg',badge:'icon.svg',tag:'rem-'+x.id,vibrate:[250,120,250],requireInteraction:true,data:{id:x.id}};
@@ -514,6 +515,32 @@ function clockSecs(x){
  return s>=5&&s<=86400?s:0;
 }
 function clockUrl(x){const s=clockSecs(x);return s?'intent:#Intent;action=android.intent.action.SET_TIMER;i.android.intent.extra.alarm.LENGTH='+s+';S.android.intent.extra.alarm.MESSAGE='+encodeURIComponent(x.t)+';B.android.intent.extra.alarm.SKIP_UI=false;end':''}
+// ---------- respuestas por voz (la voz del propio teléfono)
+let VIA=false;
+function speak(t){
+ try{
+  if(!('speechSynthesis' in window))return;
+  const ss=window.speechSynthesis;ss.cancel();
+  const u=new SpeechSynthesisUtterance(t),lang=/^es/i.test(navigator.language||'')?navigator.language:'es-ES';u.lang=lang;
+  const vs=ss.getVoices(),v=vs.find(z=>z.lang===lang)||vs.find(z=>/^es[-_](419|MX|US)/i.test(z.lang))||vs.find(z=>/^es/i.test(z.lang));
+  if(v)u.voice=v;u.rate=1;u.pitch=1;ss.speak(u);
+ }catch(e){}
+}
+function hablaHora(t){
+ const [h,m]=t.split(':').map(Number),h12=h%12||12,per=h<6?'de la madrugada':h<12?'de la mañana':h<19?'de la tarde':'de la noche';
+ return (h12===1?'la 1':'las '+h12)+(m===30?' y media':m===15?' y cuarto':m?':'+pad(m):'')+' '+per;
+}
+function hablaFecha(d){return d===today()?'hoy':d===addDays(today(),1)?'mañana':'el '+pd(d).toLocaleDateString('es',{weekday:'long',day:'numeric',month:'long'})}
+function relSpoken(r){return r.replace(/(\d+) h\b/,'$1 horas').replace(/(\d+) min\b/,'$1 minutos').replace(/\b1 horas/,'1 hora').replace(/\b1 minutos/,'1 minuto')}
+const talkMode=()=>S.cfg.talk||'mic';
+function sayConfirm(x,rel,via){
+ const mode=talkMode();if(mode==='off'||(mode==='mic'&&!via))return;
+ const t=x.t.charAt(0).toLowerCase()+x.t.slice(1);let s;
+ if(x.time)s=rel?'Listo, te aviso '+relSpoken(rel)+' para '+t:'Listo, te aviso '+(x.due&&x.due!==today()?hablaFecha(x.due)+' ':'')+'a '+hablaHora(x.time)+' para '+t;
+ else if(x.due)s='Listo, anoté '+t+' para '+hablaFecha(x.due);
+ else s='Listo, anoté '+t;
+ speak(s+'.');
+}
 // Confirma lo que la app entendió, para que puedas corregirlo o deshacerlo
 function showUnderstood(x,rel){
  let box=$('#rem');if(!box){box=document.createElement('div');box.id='rem';document.body.appendChild(box)}
@@ -555,7 +582,7 @@ function mic(btn,forId){
  rec.onresult=e=>{let t='';for(const r of e.results)t+=r[0].transcript;t=t.trim();if(t)got=true;inp.value=t.charAt(0).toUpperCase()+t.slice(1)};
  rec.onerror=e=>{got=false;off();if(e.error==='not-allowed'||e.error==='service-not-allowed')alert('Permite el micrófono para poder dictar.')};
  // al terminar de hablar, la tarea se agrega sola (con «Deshacer» si entendió mal)
- rec.onend=()=>{off();inp.focus();if(got&&inp.value.trim())setTimeout(()=>inp.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})),150)};
+ rec.onend=()=>{off();inp.focus();if(got&&inp.value.trim())setTimeout(()=>{VIA=true;inp.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))},150)};
  try{rec.start()}catch(err){off()}
 }
 
@@ -607,6 +634,9 @@ function render(){
 function settings(){
  $('#modal').innerHTML=`<div class="box"><h1 style="font-size:18px;margin-bottom:12px">Ajustes</h1>
  <label class="l">Tema</label><div class="row">${[['auto','Automático'],['light','Claro'],['dark','Oscuro']].map(([k,n])=>`<button class="${S.theme===k?'':'o'}" data-act="theme" data-k="${k}">${n}</button>`).join('')}</div>
+ <label class="l">Respuestas por voz (la voz de tu teléfono)</label>
+ <div class="row">${[['mic','Al dictar'],['all','Siempre'],['off','Silencio']].map(([k,n])=>`<button class="${talkMode()===k?'':'o'}" data-act="talk" data-k="${k}">${n}</button>`).join('')}<button class="o" data-act="talktest">Probar voz</button></div>
+ <p style="color:var(--mu);font-size:12px;margin-top:6px">«Al dictar»: te contesta cuando creas la tarea con el micrófono. Los recordatorios también se anuncian en voz alta, salvo en «Silencio».</p>
  <label class="l">Sonidos al completar y añadir tareas</label><div class="row"><button class="${S.cfg.sfx===false?'o':''}" data-act="sfx" data-k="on">Activados</button><button class="${S.cfg.sfx===false?'':'o'}" data-act="sfx" data-k="off">Silenciados</button></div>
  <div class="row" style="margin-top:8px"><button class="o" data-act="sfxtest">Probar sonido</button></div>
  <label class="l">Avisos de recordatorios: ${!('Notification' in window)?'no disponibles en este navegador':{granted:'activados',denied:'bloqueados (actívalos en los ajustes del sitio del navegador)',default:'sin activar'}[Notification.permission]}</label>
@@ -614,7 +644,7 @@ function settings(){
  <p style="color:var(--mu);font-size:12px;margin-top:6px">Los avisos suenan con Enfoque abierta o en segundo plano. Para que te avisen con la app cerrada, usa «Calendario»: el aviso lo da el calendario de tu teléfono.</p>
  <label class="l">Copia de seguridad</label><div class="row"><button class="o" data-act="export">Exportar</button><button class="o" data-act="import">Importar</button></div>
  <input type="file" id="imp" accept=".json" style="display:none">
- <p style="color:var(--mu);font-size:11px;margin-top:14px">Versión 9 · entiende frases como «en 10 minutos»</p>
+ <p style="color:var(--mu);font-size:11px;margin-top:14px">Versión 10 · te contesta con voz</p>
  <div class="row" style="justify-content:flex-end;margin-top:16px"><button data-act="close">Cerrar</button></div></div>`;
  $('#modal').classList.add('on');
 }
@@ -657,6 +687,8 @@ document.addEventListener('click',e=>{
  else if(a==='notiftest'){notifyTask({id:'prueba',t:'Aviso de prueba',time:'ahora',rem:0,notes:''})}
  else if(a==='remdone'){const x=S.tasks.find(z=>z.id===id);if(x&&!x.done){toggle(x);sfx('done');save();render()}remClose(id)}
  else if(a==='remsnz'){const x=S.tasks.find(z=>z.id===id);if(x){x.snz=Date.now()+10*60000;x.remDone=false;save();toast('Te aviso de nuevo en 10 minutos')}remClose(id)}
+ else if(a==='talk'){S.cfg.talk=el.dataset.k;save();settings();if(S.cfg.talk!=='off')speak('Listo, así te voy a contestar.')}
+ else if(a==='talktest'){if(!('speechSynthesis' in window))toast('Este navegador no tiene voz');else speak('Hola, soy Enfoque. Listo, te aviso a las 6:58 de la tarde para enviar un archivo.')}
  else if(a==='remx')remClose(id);
  else if(a==='remundo'){S.tasks=S.tasks.filter(z=>z.id!==id);if(S.timer&&S.timer.id===id)S.timer=null;save();remClose('u'+id);ui.sel=ui.sel===id?null:ui.sel;render();toast('Tarea eliminada')}
  else if(a==='clk'){const x=S.tasks.find(z=>z.id===(id||curId()));const u=clockUrl(x);if(u)location.href=u;else toast('La alarma del reloj solo sirve para las próximas 24 horas')}
@@ -703,7 +735,7 @@ document.addEventListener('change',e=>{
 document.addEventListener('keydown',e=>{
  const id=e.target.id;
  if(e.key==='Enter'||e.keyCode===13){
-  if(id==='nt'){const x=addTask(e.target.value,{list:e.target.dataset.l,p:$('#np').value,due:$('#nd').value});if(x){sfx('add');ui.collapsed={};render();$('#nt').focus();if(LASTNL)showUnderstood(x,LASTNL.rel)}}
+  if(id==='nt'){const x=addTask(e.target.value,{list:e.target.dataset.l,p:$('#np').value,due:$('#nd').value});if(x){sfx('add');ui.collapsed={};render();$('#nt').focus();if(LASTNL)showUnderstood(x,LASTNL.rel);sayConfirm(x,LASTNL?LASTNL.rel:'',VIA);VIA=false}}
   else if(id==='cn'){const x=addTask(e.target.value,{due:ui.cal.sel});if(x){render();$('#cn').focus();if(LASTNL)showUnderstood(x,LASTNL.rel)}}
   else if(id==='hn'){const t=e.target.value.trim();if(t){S.habits.push({id:uid(),t,days:[]});save();renderMain();$('#hn').focus()}}
   else if(id==='sn'){const x=S.tasks.find(z=>z.id===curId()),v=e.target.value.trim();if(x&&v){x.subs.push({t:v,done:false});save();refreshDetail();$('#sn').focus()}}
