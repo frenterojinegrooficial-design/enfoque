@@ -1,4 +1,4 @@
-const C = 'enfoque-v3';
+const C = 'enfoque-v4';
 const F = ['./', './index.html', './manifest.json', './icon.svg'];
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(C).then(c => c.addAll(F.map(u => new Request(u, { cache: 'reload' }))))); });
 self.addEventListener('activate', e => e.waitUntil(

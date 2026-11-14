@@ -23,6 +23,9 @@ button.o{background:var(--inp);color:var(--tx)}
 button.d{background:var(--rd)}
 svg{display:block}
 input[type=range]{padding:0;accent-color:var(--ac);height:28px}
+button.rec{background:var(--rd)!important;color:#fff!important}
+.toast{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);background:#222;color:#fff;padding:10px 16px;border-radius:10px;z-index:60;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;text-align:center}
+.toast.on{opacity:1}
 #app{display:grid;grid-template-columns:56px 240px minmax(0,1fr) 370px;height:100vh}
 #app.nolist{grid-template-columns:56px minmax(0,1fr)}
 #app.nolist #side,#app.nolist #detail{display:none}
@@ -129,7 +132,12 @@ const $=s=>document.querySelector(s);
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const KEY='enfoque2';
-const DEF=()=>({lists:[{id:'inbox',name:'Bandeja',color:'#4772fa'}],tasks:[],habits:[],sess:[],theme:'auto',cfg:{work:25,short:5,long:15}});
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+const DEF=()=>({lists:[{id:'inbox',name:'Bandeja',color:'#4772fa'}],tasks:[],habits:[],sess:[],timer:null,
+ templates:[
+  {id:'tp1',name:'Maleta de viaje',items:['Documentos y pasaporte','Cargador del celular','Ropa interior','Ropa para cada día','Artículos de aseo','Medicinas','Dinero y tarjetas','Audífonos']},
+  {id:'tp2',name:'Rutina de la mañana',items:['Tomar agua','Estirarme 5 minutos','Ducharme','Desayunar','Revisar mi agenda del día']}],
+ theme:'auto',cfg:{work:25,short:5,long:15}});
 let S;try{S=Object.assign(DEF(),JSON.parse(localStorage.getItem(KEY)))}catch{S=DEF()}
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch{}};
 const pad=n=>String(n).padStart(2,'0');
@@ -157,7 +165,8 @@ const IC={
  plus:'<path d="M12 5v14M5 12h14"/>',
  gear:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1.1 1.7 1.7 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.8.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H21a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/>',
  car:'<path d="M6 9l6 6 6-6"/>',
- tag:'<path d="M20 12l-8 8-9-9V3h8l9 9z"/><circle cx="7.5" cy="7.5" r="1"/>'
+ tag:'<path d="M20 12l-8 8-9-9V3h8l9 9z"/><circle cx="7.5" cy="7.5" r="1"/>',
+ tpl:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/>'
 };
 const ic=(n,s=20)=>`<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${IC[n]}</svg>`;
 
@@ -218,7 +227,7 @@ function renderSide(){
  const c={hoy:open.filter(filterFor('hoy')).length,man:open.filter(filterFor('man')).length,prox:open.filter(filterFor('prox')).length,todas:open.length};
  const nav=(id,i,name,n)=>`<div class="nv ${ui.view===id?'on':''}" data-act="nav" data-v="${id}">${ic(i)}<span class="n">${name}</span><span class="c">${n||''}</span></div>`;
  const tags=[...new Set(S.tasks.flatMap(x=>x.tags))];
- $('#side').innerHTML=`${nav('hoy','today','Hoy',c.hoy)}${nav('man','tom','Mañana',c.man)}${nav('prox','week','Próximos 7 días',c.prox)}${nav('todas','all','Todas',c.todas)}
+ $('#side').innerHTML=`${nav('hoy','today','Hoy',c.hoy)}${nav('man','tom','Mañana',c.man)}${nav('prox','week','Próximos 7 días',c.prox)}${nav('todas','all','Todas',c.todas)}${nav('plant','tpl','Plantillas',S.templates.length)}
  <div class="sh">Listas <button class="g" data-act="newlist" title="Nueva lista">${ic('plus',16)}</button></div>
  ${S.lists.map(l=>`<div class="nv ${ui.view==='list:'+l.id?'on':''}" data-act="nav" data-v="list:${l.id}"><i class="dot" style="background:${l.color}"></i><span class="n">${esc(l.name)}</span><span class="c">${open.filter(x=>x.list===l.id).length||''}</span></div>`).join('')}
  ${tags.length?`<div class="sh">Etiquetas</div>${tags.map(g=>`<div class="nv ${ui.view==='tag:'+g?'on':''}" data-act="nav" data-v="tag:${esc(g)}">${ic('tag')}<span class="n">${esc(g)}</span></div>`).join('')}`:''}`;
@@ -234,7 +243,7 @@ function taskRow(x,showList=true){
  return `<div class="tr ${x.done?'dn':''} ${sel?'sel':''}" data-act="open" data-id="${x.id}">
  <span class="cb p${x.p} ${x.done?'on':''}" data-act="chk" data-id="${x.id}"></span>
  <span class="ttl">${esc(x.t)}</span>
- <span class="mt">${x.subs.length?`<span>☑ ${sd}/${x.subs.length}</span>`:''}${x.pomos?`<span>🍅${x.pomos}</span>`:''}${x.tags.map(g=>`<span class="tg">#${esc(g)}</span>`).join('')}${showList&&x.list!=='inbox'?`<span class="lst">${esc(l.name)}</span>`:''}${x.due?`<span class="dt ${dc}">${label(x.due)}${x.rep?' ↻':''}</span>`:''}</span></div>`;
+ <span class="mt">${x.subs.length?`<span>☑ ${sd}/${x.subs.length}</span>`:''}${x.pomos?`<span>🍅${x.pomos}</span>`:''}${(x.est||x.spentS||(S.timer&&S.timer.id===x.id))?`<span>⏱ ${fmtD(spentNow(x))}${x.est?' / '+x.est+' min':''}${S.timer&&S.timer.id===x.id?' ▶':''}</span>`:''}${x.tags.map(g=>`<span class="tg">#${esc(g)}</span>`).join('')}${showList&&x.list!=='inbox'?`<span class="lst">${esc(l.name)}</span>`:''}${x.due?`<span class="dt ${dc}">${label(x.due)}${x.rep?' ↻':''}</span>`:''}</span></div>`;
 }
 const TITLES={hoy:'Hoy',man:'Mañana',prox:'Próximos 7 días',todas:'Todas'};
 function renderTasks(){
@@ -247,7 +256,7 @@ function renderTasks(){
  const inList=v.startsWith('list:');
  let h=`<div class="pad"><div class="hd"><button class="g menu" data-act="drawer">${ic('menu')}</button><h1>${esc(title)}</h1>${inList&&v!=='list:inbox'?`<button class="g" data-act="dellist" data-id="${v.slice(5)}">Eliminar lista</button>`:''}</div>
  <div class="addbar">${ic('plus',18)}<input id="nt" placeholder="Añadir tarea a «${esc(inList?listOf(defList).name:'Bandeja')}», pulsa Enter" data-l="${defList}">
- <input id="nd" type="date" value="${defDue}" title="Fecha"><select id="np" title="Prioridad"><option value="0">Prioridad</option><option value="3">Alta</option><option value="2">Media</option><option value="1">Baja</option></select><button data-act="go" data-for="nt">Añadir</button></div>`;
+ <input id="nd" type="date" value="${defDue}" title="Fecha"><select id="np" title="Prioridad"><option value="0">Prioridad</option><option value="3">Alta</option><option value="2">Media</option><option value="1">Baja</option></select>${SR?'<button class="o" data-act="mic" data-for="nt" title="Dictar tarea por voz">🎤</button>':''}<button data-act="go" data-for="nt">Añadir</button></div>`;
  if(!open.length&&!done.length)h+=`<div class="empty"><b>✓</b>Nada por aquí. Añade tu primera tarea.</div>`;
  if(v==='prox'||v==='hoy'||v==='man'||true)groups(open).forEach(g=>{
   const cl=ui.collapsed[g.n];
@@ -287,7 +296,7 @@ function startT(){
   if(T.left===0){
    stopT();beep();if(navigator.vibrate)navigator.vibrate([200,100,200]);
    const was=T.mode;
-   if(was==='work'){S.sess.push({d:today(),task:T.task,min:S.cfg.work});const x=S.tasks.find(z=>z.id===T.task);if(x)x.pomos++;save()}
+   if(was==='work'){S.sess.push({d:today(),task:T.task,min:S.cfg.work});const x=S.tasks.find(z=>z.id===T.task);if(x){x.pomos++;x.spentS=(x.spentS||0)+S.cfg.work*60}save()}
    T.mode=was==='work'?'short':'work';T.left=S.cfg[T.mode]*60;
    render();setTimeout(()=>alert(was==='work'?'¡Sesión completada! Toma una pausa.':'Pausa terminada. ¡A trabajar!'),60);return;
   }
@@ -341,7 +350,58 @@ function renderStats(){
  <div><b>${(S.sess.reduce((a,b)=>a+b.min,0)/60).toFixed(1)}</b><small>Horas de foco</small></div>
  <div><b>${S.habits.reduce((a,h)=>Math.max(a,streaks(h).best),0)}</b><small>Mejor racha</small></div></div>
  <div class="card"><b>Tareas completadas (7 días)</b><div style="margin-top:12px">${bars(dn,lb,'var(--ok)')}</div></div>
- <div class="card"><b>Minutos de foco (7 días)</b><div style="margin-top:12px">${bars(foc,lb,'var(--ac)')}</div></div></div>`;
+ <div class="card"><b>Minutos de foco (7 días)</b><div style="margin-top:12px">${bars(foc,lb,'var(--ac)')}</div></div>${estCard()}</div>`;
+}
+function estCard(){
+ const l=S.tasks.filter(x=>x.done&&x.est&&x.spentS).sort((a,b)=>(b.doneAt||'').localeCompare(a.doneAt||'')).slice(0,6);
+ if(!l.length)return '<div class="card"><b>Estimado vs. tiempo real</b><p style="color:var(--mu);margin-top:6px">Ponle un tiempo estimado a una tarea y usa el cronómetro o el Pomodoro. Al terminarla verás aquí cuánto te equivocaste.</p></div>';
+ const te=l.reduce((a,x)=>a+x.est,0),tr=l.reduce((a,x)=>a+Math.round(x.spentS/60),0);
+ return `<div class="card"><b>Estimado vs. tiempo real</b><div style="color:var(--mu);font-size:13px;margin:6px 0 10px">Últimas ${l.length} tareas: estimaste ${te} min y tardaste ${tr} min (${tr>te?'+':''}${Math.round((tr-te)/te*100)}%).</div>${l.map(x=>{const r=Math.round(x.spentS/60);return `<div class="row" style="justify-content:space-between;padding:4px 0"><span>${esc(x.t)}</span><span style="color:${r>x.est?'var(--rd)':'var(--ok)'}">${x.est} → ${r} min</span></div>`}).join('')}</div>`;
+}
+
+// ---------- plantillas
+function renderPlant(){
+ return `<div class="pad"><div class="hd"><button class="g menu" data-act="drawer">${ic('menu')}</button><h1>Plantillas</h1><button data-act="tpledit" data-id="">Nueva plantilla</button></div>
+ <p style="color:var(--mu);margin-bottom:12px">Una plantilla es una lista que usas una y otra vez. Al usarla se crea una tarea con todos sus pasos como subtareas.</p>
+ ${S.templates.length?S.templates.map(p=>`<div class="card"><div class="hn"><b>${esc(p.name)}</b><span class="row"><button data-act="tpluse" data-id="${p.id}">Usar</button><button class="o" data-act="tpledit" data-id="${p.id}">Editar</button></span></div>
+ <div style="color:var(--mu);font-size:13px">${p.items.length} pasos${p.items.length?': '+esc(p.items.slice(0,4).join(', '))+(p.items.length>4?'…':''):''}</div></div>`).join(''):'<div class="empty"><b>📋</b>Crea tu primera plantilla</div>'}</div>`;
+}
+function tplEdit(id){
+ const p=S.templates.find(z=>z.id===id)||{name:'',items:[]};
+ $('#modal').innerHTML=`<div class="box"><h1 style="font-size:18px;margin-bottom:6px">${id?'Editar':'Nueva'} plantilla</h1>
+ <label class="l">Nombre</label><input id="tn" value="${esc(p.name)}" placeholder="Ej. Maleta de viaje">
+ <label class="l">Pasos (uno por línea)</label><textarea id="ti" style="min-height:170px;background:var(--inp)" placeholder="Pasaporte&#10;Cargador&#10;Ropa">${esc(p.items.join('\n'))}</textarea>
+ <div class="row" style="justify-content:space-between;margin-top:14px">${id?`<button class="g" style="color:var(--rd)" data-act="tpldel" data-id="${id}">Eliminar</button>`:'<span></span>'}<span class="row"><button class="o" data-act="close">Cancelar</button><button data-act="tplsave" data-id="${id}">Guardar</button></span></div></div>`;
+ $('#modal').classList.add('on');
+}
+function tplUse(id){
+ const p=S.templates.find(z=>z.id===id);if(!p)return;
+ $('#modal').innerHTML=`<div class="box"><h1 style="font-size:18px;margin-bottom:4px">${esc(p.name)}</h1><p style="color:var(--mu)">Se creará una tarea con ${p.items.length} subtareas.</p>
+ <div class="row"><div class="f"><label class="l">Fecha (opcional)</label><input id="ud" type="date"></div>
+ <div class="f"><label class="l">Lista</label><select id="ul">${S.lists.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('')}</select></div></div>
+ <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="o" data-act="close">Cancelar</button><button data-act="tplgo" data-id="${id}">Crear tarea</button></div></div>`;
+ $('#modal').classList.add('on');
+}
+
+// ---------- tiempo real por tarea (cronómetro)
+function fmtD(s){s=Math.max(0,Math.round(s));if(s<60)return s+' s';const m=Math.floor(s/60);return m<60?m+' min':Math.floor(m/60)+' h '+pad(m%60)+' min'}
+const spentNow=x=>(x.spentS||0)+(S.timer&&S.timer.id===x.id?Math.round((Date.now()-S.timer.start)/1000):0);
+function tstop(){if(!S.timer)return;const x=S.tasks.find(z=>z.id===S.timer.id);if(x)x.spentS=(x.spentS||0)+Math.round((Date.now()-S.timer.start)/1000);S.timer=null;save()}
+function tstart(id){tstop();S.timer={id,start:Date.now()};save()}
+
+// ---------- dictado por voz
+let rec=null;
+function mic(btn,forId){
+ if(!SR)return;
+ if(rec){rec.stop();return}
+ const inp=$('#'+forId);if(!inp)return;
+ rec=new SR();rec.lang=/^es/i.test(navigator.language||'')?navigator.language:'es-ES';rec.interimResults=true;rec.continuous=false;
+ const off=()=>{rec=null;btn.textContent='🎤';btn.classList.remove('rec')};
+ btn.textContent='■';btn.classList.add('rec');
+ rec.onresult=e=>{let t='';for(const r of e.results)t+=r[0].transcript;t=t.trim();inp.value=t.charAt(0).toUpperCase()+t.slice(1)};
+ rec.onerror=e=>{off();if(e.error==='not-allowed'||e.error==='service-not-allowed')alert('Permite el micrófono para poder dictar.')};
+ rec.onend=()=>{off();inp.focus()};
+ try{rec.start()}catch(err){off()}
 }
 
 // ---------- detalle de tarea (panel derecho o ventana)
@@ -355,9 +415,12 @@ function detailHTML(x,modal){
  <textarea id="en" placeholder="Descripción">${esc(x.notes)}</textarea>
  ${x.subs.map((s,i)=>`<div class="sub ${s.done?'dn':''}"><span class="cb ${s.done?'on':''}" data-act="subchk" data-i="${i}"></span><span>${esc(s.t)}</span><button class="g" data-act="subdel" data-i="${i}">✕</button></div>`).join('')}
  <div class="addbar" style="margin:8px 0 0">${ic('plus',16)}<input id="sn" placeholder="Añadir subtarea" style="padding:7px 4px"><button class="o" data-act="go" data-for="sn">＋</button></div>
+ <div class="df" style="margin-top:12px"><span style="color:var(--mu)">⏱ Estimado</span><input id="ee" type="number" min="0" step="5" value="${x.est||''}" placeholder="min" style="flex:none;width:80px;min-width:0">
+ <span style="color:var(--mu)">Real: <b id="rt" data-id="${x.id}" style="color:var(--tx)">${fmtD(spentNow(x))}</b></span>
+ <button class="${S.timer&&S.timer.id===x.id?'d':'o'}" data-act="tstart">${S.timer&&S.timer.id===x.id?'■ Detener':'▶ Cronómetro'}</button></div>
  <div class="df"><select id="el" title="Lista">${S.lists.map(l=>`<option value="${l.id}" ${l.id===x.list?'selected':''}>${esc(l.name)}</option>`).join('')}</select>
  <input id="eg" value="${esc(x.tags.map(g=>'#'+g).join(' '))}" placeholder="#etiquetas">
- <button class="o" data-act="tofoco" title="Trabajar en esto con el temporizador">🍅 Foco</button><button class="g" data-act="del" title="Eliminar" style="color:var(--rd)">Eliminar</button></div>`;
+ <button class="o" data-act="tofoco" title="Trabajar en esto con el temporizador">🍅 Foco</button><button class="o" data-act="savetpl" title="Guardar esta tarea y sus subtareas como plantilla">📋 Plantilla</button><button class="g" data-act="del" title="Eliminar" style="color:var(--rd)">Eliminar</button></div>`;
 }
 function renderDetail(){
  const d=$('#detail');
@@ -376,7 +439,7 @@ function refreshDetail(){const x=S.tasks.find(z=>z.id===curId());if(!x)return;if
 // ---------- render general
 function renderMain(){
  const v=ui.view,st=$('#main').scrollTop;
- $('#main').innerHTML=v==='cal'?renderCal():v==='foco'?renderFoco():v==='hab'?renderHab():v==='stats'?renderStats():renderTasks();
+ $('#main').innerHTML=v==='cal'?renderCal():v==='foco'?renderFoco():v==='hab'?renderHab():v==='stats'?renderStats():v==='plant'?renderPlant():renderTasks();
  $('#main').scrollTop=st;
 }
 function render(){
@@ -390,7 +453,7 @@ function settings(){
  <div class="row" style="margin-top:8px"><button class="o" data-act="sfxtest">Probar sonido</button></div>
  <label class="l">Copia de seguridad</label><div class="row"><button class="o" data-act="export">Exportar</button><button class="o" data-act="import">Importar</button></div>
  <input type="file" id="imp" accept=".json" style="display:none">
- <p style="color:var(--mu);font-size:11px;margin-top:14px">Versión 6 · sonidos con audio normal</p>
+ <p style="color:var(--mu);font-size:11px;margin-top:14px">Versión 7 · voz, compartir, plantillas y tiempo real</p>
  <div class="row" style="justify-content:flex-end;margin-top:16px"><button data-act="close">Cerrar</button></div></div>`;
  $('#modal').classList.add('on');
 }
@@ -406,7 +469,7 @@ document.addEventListener('click',e=>{
  else if(a==='rail'){const v=el.dataset.v;ui.view=v==='tasks'?ui.lastTV:v;ui.drawer=false;render()}
  else if(a==='nav'){ui.view=ui.lastTV=el.dataset.v;ui.drawer=false;ui.sel=null;render()}
  else if(a==='drawer'){ui.drawer=!ui.drawer;renderSide()}
- else if(a==='chk'){const t=task(),was=t.done;toggle(t);if(!was)sfx('done');save();if(ui.edit)refreshDetail();else render()}
+ else if(a==='chk'){const t=task(),was=t.done;if(!was&&S.timer&&S.timer.id===t.id)tstop();toggle(t);if(!was)sfx('done');save();if(ui.edit)refreshDetail();else render()}
  else if(a==='sfx'){S.cfg.sfx=el.dataset.k==='on';save();if(S.cfg.sfx)sfx('done');settings()}
  else if(a==='sfxtest'){const old=S.cfg.sfx;S.cfg.sfx=true;sfx('done');S.cfg.sfx=old}
  else if(a==='open')openTask(id);
@@ -427,12 +490,21 @@ document.addEventListener('click',e=>{
  else if(a==='hdel'){if(confirm('¿Eliminar hábito?')){S.habits=S.habits.filter(h=>h.id!==id);save();renderMain()}}
  else if(a==='hday'){const h=S.habits.find(h=>h.id===id),d=el.dataset.d;h.days=h.days.includes(d)?h.days.filter(z=>z!==d):[...h.days,d];save();renderMain()}
  else if(a==='close')closeModal();
- else if(a==='del'){if(confirm('¿Eliminar la tarea?')){S.tasks=S.tasks.filter(z=>z.id!==curId());ui.sel=null;save();if(ui.edit)closeModal();else render()}}
+ else if(a==='mic')mic(el,el.dataset.for);
+ else if(a==='tpledit')tplEdit(id);
+ else if(a==='tpluse')tplUse(id);
+ else if(a==='tplsave'){const n=($('#tn').value||'').trim(),items=($('#ti').value||'').split('\n').map(s=>s.trim()).filter(Boolean);if(!n){$('#tn').focus();return}const p=S.templates.find(z=>z.id===id);if(p){p.name=n;p.items=items}else S.templates.push({id:uid(),name:n,items});save();closeModal()}
+ else if(a==='tpldel'){if(confirm('¿Eliminar la plantilla?')){S.templates=S.templates.filter(z=>z.id!==id);save();closeModal()}}
+ else if(a==='tplgo'){const p=S.templates.find(z=>z.id===id);if(p){const x={id:uid(),t:p.name,notes:'',list:$('#ul').value,tags:[],p:0,due:$('#ud').value,rep:'',done:false,doneAt:null,subs:p.items.map(t=>({t,done:false})),pomos:0,est:0,spentS:0};S.tasks.push(x);save();sfx('add');ui.view=ui.lastTV='todas';ui.sel=x.id;ui.collapsed={};closeModal();toast('Tarea creada con '+p.items.length+' pasos')}}
+ else if(a==='savetpl'){const x=task();if(!x.subs.length){alert('Añade primero los pasos como subtareas y luego guárdala como plantilla.');return}S.templates.push({id:uid(),name:x.t,items:x.subs.map(s=>s.t)});save();toast('Plantilla guardada: '+x.t);renderSide()}
+ else if(a==='tstart'){const x=task();if(S.timer&&S.timer.id===x.id)tstop();else tstart(x.id);refreshDetail()}
+ else if(a==='del'){if(confirm('¿Eliminar la tarea?')){if(S.timer&&S.timer.id===curId())S.timer=null;S.tasks=S.tasks.filter(z=>z.id!==curId());ui.sel=null;save();if(ui.edit)closeModal();else render()}}
  else if(a==='tofoco'){T.task=curId();ui.edit=null;$('#modal').classList.remove('on');ui.view='foco';render()}
  else if(a==='subchk'){const x=task(),s=x.subs[+el.dataset.i];s.done=!s.done;if(s.done)sfx('done');save();refreshDetail()}
  else if(a==='subdel'){const x=task();x.subs.splice(+el.dataset.i,1);save();refreshDetail()}
 });
 const FIELDS={
+ ee:(x,v)=>{x.est=Math.max(0,Math.round(+v||0))},
  et:(x,v)=>{x.t=v.trim()||x.t},en:(x,v)=>{x.notes=v},el:(x,v)=>{x.list=v},ep:(x,v)=>{x.p=+v},ed:(x,v)=>{x.due=v},er:(x,v)=>{x.rep=v},
  eg:(x,v)=>{x.tags=v.split(/[\s,]+/).map(s=>s.replace(/^#/,'').trim()).filter(Boolean)}
 };
@@ -526,8 +598,20 @@ function sfx(k){
 }
 let lastWide=wide();
 addEventListener('resize',()=>{const w=wide();if(w!==lastWide){lastWide=w;renderMain();renderDetail()}});
+function toast(m){let t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';document.body.appendChild(t)}t.textContent=m;t.className='toast on';clearTimeout(toast.h);toast.h=setTimeout(()=>{t.className='toast'},2800)}
+setInterval(()=>{const e=$('#rt');if(e){const x=S.tasks.find(z=>z.id===e.dataset.id);if(x)e.textContent=fmtD(spentNow(x))}},1000);
+if(S.timer&&!S.tasks.some(z=>z.id===S.timer.id))S.timer=null;
 document.documentElement.dataset.t=S.theme;
 render();
+// Compartir a Enfoque: llega por la dirección (?title=&text=&url=) cuando otra app comparte con la app instalada
+(function(){
+ const q=new URLSearchParams(location.search),ti=q.get('title')||'',tx=q.get('text')||'',u=q.get('url')||'';
+ if(!(ti||tx||u))return;
+ const body=[tx,u].filter(Boolean).join('\n').trim();let t=(ti||tx||u).split('\n')[0].trim();if(t.length>120)t=t.slice(0,117)+'…';
+ const x={id:uid(),t,notes:body===t?'':body,list:'inbox',tags:[],p:0,due:'',rep:'',done:false,doneAt:null,subs:[],pomos:0,est:0,spentS:0};
+ S.tasks.push(x);save();try{history.replaceState(null,'',location.pathname)}catch(e){}
+ ui.view=ui.lastTV='todas';ui.sel=x.id;render();toast('Guardado desde Compartir: '+t);
+})();
 if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script>
 </body>
