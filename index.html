@@ -115,6 +115,7 @@ label.l{display:block;font-size:12px;color:var(--mu);margin:10px 0 4px}
  #main{height:calc(100vh - 58px)}
  .addbar{flex-wrap:wrap}.addbar #nt,.addbar #cn,.addbar #hn,.addbar #sn{flex:1 1 calc(100% - 40px);min-width:0}
  .addbar select,.addbar input[type=date]{flex:1}
+ .addbar button{flex:none}
 }
 </style>
 </head>
@@ -245,7 +246,7 @@ function renderTasks(){
  const inList=v.startsWith('list:');
  let h=`<div class="pad"><div class="hd"><button class="g menu" data-act="drawer">${ic('menu')}</button><h1>${esc(title)}</h1>${inList&&v!=='list:inbox'?`<button class="g" data-act="dellist" data-id="${v.slice(5)}">Eliminar lista</button>`:''}</div>
  <div class="addbar">${ic('plus',18)}<input id="nt" placeholder="Añadir tarea a «${esc(inList?listOf(defList).name:'Bandeja')}», pulsa Enter" data-l="${defList}">
- <input id="nd" type="date" value="${defDue}" title="Fecha"><select id="np" title="Prioridad"><option value="0">Prioridad</option><option value="3">Alta</option><option value="2">Media</option><option value="1">Baja</option></select></div>`;
+ <input id="nd" type="date" value="${defDue}" title="Fecha"><select id="np" title="Prioridad"><option value="0">Prioridad</option><option value="3">Alta</option><option value="2">Media</option><option value="1">Baja</option></select><button data-act="go" data-for="nt">Añadir</button></div>`;
  if(!open.length&&!done.length)h+=`<div class="empty"><b>✓</b>Nada por aquí. Añade tu primera tarea.</div>`;
  if(v==='prox'||v==='hoy'||v==='man'||true)groups(open).forEach(g=>{
   const cl=ui.collapsed[g.n];
@@ -267,7 +268,7 @@ function renderCal(){
  return `<div class="pad"><div class="hd"><h1>${MES[m]} ${y}</h1><button class="o" data-act="calprev">‹</button><button class="o" data-act="caltoday">Hoy</button><button class="o" data-act="calnext">›</button></div>
  <div class="cal">${DOW.map(d=>`<div class="h">${d}</div>`).join('')}${cells}</div>
  <div style="margin-top:16px"><b>${label(sel)}</b> <span style="color:var(--mu)">${sel}</span>
- <div class="addbar" style="margin-top:8px">${ic('plus',18)}<input id="cn" placeholder="Nueva tarea para este día"></div>
+ <div class="addbar" style="margin-top:8px">${ic('plus',18)}<input id="cn" placeholder="Nueva tarea para este día"><button data-act="go" data-for="cn">Añadir</button></div>
  ${dayT.length?dayT.map(x=>taskRow(x)).join(''):'<div class="empty" style="padding:20px">Sin tareas este día</div>'}</div></div>`;
 }
 
@@ -316,7 +317,7 @@ function streaks(h){
 }
 function renderHab(){
  const w=last(14);
- return `<div class="pad"><div class="hd"><h1>Hábitos</h1></div><div class="addbar">${ic('plus',18)}<input id="hn" placeholder="Nuevo hábito (ej. Leer 20 min), pulsa Enter"></div>
+ return `<div class="pad"><div class="hd"><h1>Hábitos</h1></div><div class="addbar">${ic('plus',18)}<input id="hn" placeholder="Nuevo hábito (ej. Leer 20 min)"><button data-act="go" data-for="hn">Añadir</button></div>
  ${S.habits.length?S.habits.map(h=>{const s=streaks(h),pc=Math.round(last(30).filter(d=>h.days.includes(d)).length/30*100);
  return `<div class="card"><div class="hn"><b>${esc(h.t)}</b><button class="g" data-act="hdel" data-id="${h.id}">✕</button></div>
  <div class="week">${w.map(d=>`<i class="${h.days.includes(d)?'on':''}" data-act="hday" data-id="${h.id}" data-d="${d}">${pd(d).getDate()}</i>`).join('')}</div>
@@ -350,7 +351,7 @@ function detailHTML(x,modal){
  <input id="et" value="${esc(x.t)}" placeholder="Título">
  <textarea id="en" placeholder="Descripción">${esc(x.notes)}</textarea>
  ${x.subs.map((s,i)=>`<div class="sub ${s.done?'dn':''}"><span class="cb ${s.done?'on':''}" data-act="subchk" data-i="${i}"></span><span>${esc(s.t)}</span><button class="g" data-act="subdel" data-i="${i}">✕</button></div>`).join('')}
- <div class="addbar" style="margin:8px 0 0">${ic('plus',16)}<input id="sn" placeholder="Añadir subtarea" style="padding:7px 4px"></div>
+ <div class="addbar" style="margin:8px 0 0">${ic('plus',16)}<input id="sn" placeholder="Añadir subtarea" style="padding:7px 4px"><button class="o" data-act="go" data-for="sn">＋</button></div>
  <div class="df"><select id="el" title="Lista">${S.lists.map(l=>`<option value="${l.id}" ${l.id===x.list?'selected':''}>${esc(l.name)}</option>`).join('')}</select>
  <input id="eg" value="${esc(x.tags.map(g=>'#'+g).join(' '))}" placeholder="#etiquetas">
  <button class="o" data-act="tofoco" title="Trabajar en esto con el temporizador">🍅 Foco</button><button class="g" data-act="del" title="Eliminar" style="color:var(--rd)">Eliminar</button></div>`;
@@ -394,7 +395,8 @@ document.addEventListener('click',e=>{
  const el=e.target.closest('[data-act]');if(!el)return;
  const a=el.dataset.act,id=el.dataset.id;
  const task=()=>S.tasks.find(z=>z.id===(id||curId()));
- if(a==='rail'){const v=el.dataset.v;ui.view=v==='tasks'?ui.lastTV:v;ui.drawer=false;render()}
+ if(a==='go'){const i=$('#'+el.dataset.for);if(i)i.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))}
+ else if(a==='rail'){const v=el.dataset.v;ui.view=v==='tasks'?ui.lastTV:v;ui.drawer=false;render()}
  else if(a==='nav'){ui.view=ui.lastTV=el.dataset.v;ui.drawer=false;ui.sel=null;render()}
  else if(a==='drawer'){ui.drawer=!ui.drawer;renderSide()}
  else if(a==='chk'){toggle(task());save();if(ui.edit)refreshDetail();else render()}
@@ -446,7 +448,7 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('keydown',e=>{
  const id=e.target.id;
- if(e.key==='Enter'){
+ if(e.key==='Enter'||e.keyCode===13){
   if(id==='nt'){const x=addTask(e.target.value,{list:e.target.dataset.l,p:$('#np').value,due:$('#nd').value});if(x){ui.collapsed={};render();$('#nt').focus()}}
   else if(id==='cn'){if(addTask(e.target.value,{due:ui.cal.sel})){render();$('#cn').focus()}}
   else if(id==='hn'){const t=e.target.value.trim();if(t){S.habits.push({id:uid(),t,days:[]});save();renderMain();$('#hn').focus()}}
