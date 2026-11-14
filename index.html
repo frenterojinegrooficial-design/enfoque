@@ -194,19 +194,92 @@ function toggle(t){
   if(t.rep)S.tasks.push({...t,id:uid(),done:false,doneAt:null,pomos:0,spentS:0,remDone:false,snz:0,due:nextDue(t.due||today(),t.rep),subs:t.subs.map(s=>({...s,done:false}))});
  }else{t.done=false;t.doneAt=null}
 }
+// ---------- entender frases: «tengo que enviar un archivo en 10 minutos», «el viernes a las 5 y media»...
+const NUMW={un:1,una:1,uno:1,dos:2,tres:3,cuatro:4,cinco:5,seis:6,siete:7,ocho:8,nueve:9,diez:10,once:11,doce:12,quince:15,veinte:20,treinta:30,cuarenta:40,cincuenta:50,sesenta:60};
+const DIASEM={domingo:0,lunes:1,martes:2,miercoles:3,jueves:4,viernes:5,sabado:6};
+let LASTNL=null;
+const fmtMin=m=>m<60?m+' min':(Math.floor(m/60)+' h'+(m%60?' '+m%60+' min':''));
+const numOf=s=>{s=String(s).toLowerCase().replace(',','.');return /^[\d.]+$/.test(s)?parseFloat(s):(NUMW[s]||0)};
+function parseNL(txt,dueIn){
+ let due='',time='',dateTxt=false,rel='',hm=null,part='';
+ const now=new Date(),nowMin=now.getHours()*60+now.getMinutes();
+ const cut=m=>{txt=(txt.slice(0,m.index)+' '+txt.slice(m.index+m[0].length)).replace(/\s{2,}/g,' ').trim()};
+ let m;
+ // 1) tiempo relativo: «en 10 minutos», «dentro de media hora», «en una hora y media», «en 3 días»
+ m=txt.match(/\b(?:en|dentro de|de aqu[ií] a)\s+(media hora|un cuarto de hora|(\d+(?:[.,]\d+)?|cincuenta|cuarenta|treinta|veinte|quince|sesenta|doce|once|diez|nueve|ocho|siete|seis|cinco|cuatro|tres|dos|una|uno|un)\s*(minutos?|mins?|horas?|hrs?|h|d[ií]as?|semanas?))(?:\s+y\s+(media|cuarto))?(?![\p{L}\d])/iu);
+ if(m){
+  let min=0,days=0;const g=m[1].toLowerCase();
+  if(g==='media hora')min=30;else if(g==='un cuarto de hora')min=15;
+  else{const n=numOf(m[2]),u=m[3].toLowerCase();
+   if(u.startsWith('min'))min=n;else if(u[0]==='h')min=n*60;else if(u[0]==='d')days=n;else days=n*7;
+   if(m[4]&&min)min+=/media/i.test(m[4])?30:15}
+  if(days>0){due=addDays(today(),Math.round(days));rel='en '+Math.round(days)+(Math.round(days)===1?' día':' días');dateTxt=true;cut(m)}
+  else if(min>0){let t=Math.round((now.getTime()+min*60000)/60000)*60000;if(t<now.getTime()+30000)t+=60000;
+   const d=new Date(t);due=ds(d);time=pad(d.getHours())+':'+pad(d.getMinutes());rel='en '+fmtMin(Math.round(min));dateTxt=true;cut(m)}
+ }
+ // 2) «a las 5», «a las 5 y media», «a las 8 de la mañana», «a la una»
+ if(!time){
+  m=txt.match(/\ba\s+las?\s+(\d{1,2}|doce|once|diez|nueve|ocho|siete|seis|cinco|cuatro|tres|dos|una)(?::(\d{2}))?(?:\s+(y\s+media|y\s+cuarto|menos\s+cuarto))?\s*(am|pm|a\.m\.|p\.m\.)?(?:\s+de\s+la\s+(tarde|noche|mañana|madrugada))?(?![\p{L}\d])/iu);
+  if(m){let h=numOf(m[1]),mi=m[2]?+m[2]:0;const ex=(m[3]||'').toLowerCase();
+   if(/media/.test(ex))mi=30;else if(/y\s+cuarto/.test(ex))mi=15;else if(/menos/.test(ex)){h=h===1?12:h-1;mi=45}
+   hm={h,mi,mer:((m[4]||m[5]||'').toLowerCase().replace(/\./g,''))};cut(m)}
+ }
+ // 3) «17:30», «9am» al final
+ if(!time&&!hm){
+  m=txt.match(/\s+(\d{1,2}):(\d{2})\s*(am|pm)?$/i);
+  if(m){hm={h:+m[1],mi:+m[2],mer:(m[3]||'').toLowerCase()};cut(m)}
+  else{m=txt.match(/\s+(\d{1,2})\s*(am|pm)$/i);if(m){hm={h:+m[1],mi:0,mer:m[2].toLowerCase()};cut(m)}}
+ }
+ // 4) fecha: «pasado mañana», «mañana», «hoy», «el viernes», «esta noche», «por la tarde»
+ if(!dateTxt){
+  m=txt.match(/\bpasado\s+mañana\b/i);
+  if(m){due=addDays(today(),2);dateTxt=true;cut(m)}
+ }
+ if(!dateTxt){
+  m=txt.match(/\b(?:esta|por la)\s+(mañana|tarde|noche)\b/i);
+  if(m){part=m[1].toLowerCase();due=today();dateTxt=true;cut(m)}
+ }
+ if(!dateTxt){
+  m=txt.match(/\bmañana\b/i);
+  if(m){due=addDays(today(),1);dateTxt=true;cut(m)}
+  else{m=txt.match(/\bhoy\b/i);if(m){due=today();dateTxt=true;cut(m)}}
+ }
+ if(!dateTxt){
+  m=txt.match(/\b(?:(?:el|este)\s+|(?:el\s+)?pr[oó]xim[oa]\s+)?(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\b/i);
+  if(m){const k=m[1].toLowerCase().replace('é','e').replace('á','a');let diff=(DIASEM[k]-now.getDay()+7)%7;if(diff===0)diff=7;due=addDays(today(),diff);dateTxt=true;cut(m)}
+ }
+ // 5) hora final
+ if(hm){
+  let {h,mi,mer}=hm;
+  if(/pm|tarde|noche/.test(mer)&&h<12)h+=12;
+  else if(/^(am|mañana|madrugada)$/.test(mer)&&h===12)h=0;
+  else if(mer==='noche'&&h===12)h=0;
+  if(!mer&&h>=1&&h<=11&&(!dateTxt||due===today())&&(!dueIn||dueIn===today())){
+   if(h*60+mi<=nowMin&&(h+12)*60+mi>nowMin)h+=12}  // «a las 7» a las 5 de la tarde = 19:00
+  if(h<24&&mi<60)time=pad(h)+':'+pad(mi);
+ }else if(part&&!time)time={mañana:'09:00',tarde:'16:00',noche:'20:00'}[part];
+ due=due||dueIn||'';
+ if(time&&!dateTxt&&(!dueIn||dueIn===today())){due=today();const[hh,mm]=time.split(':').map(Number);if(hh*60+mm<=nowMin)due=addDays(today(),1)}
+ if(time&&!due)due=today();
+ return {txt,due,time,rel,fromText:!!(time||dateTxt)};
+}
+// Quita «tengo que», «recuérdame», «necesito»... y deja el título limpio
+function cleanTitle(t){
+ t=t.replace(/^(?:(?:por favor|oye|hey|ok|bueno)[, ]+)?(?:recu[eé]rdame(?: que| de)?|recordarme(?: que| de)?|recordar(?: que| de)?|av[ií]same(?: que| de| cuando)?|ac[uú]erdame(?: de| que)?|no (?:olvides|olvidar)(?: de| que)?|tengo que|tienes que|debo|debería|necesito|hay que|me toca|quiero|voy a)\s+/i,'');
+ for(let i=0;i<3;i++)t=t.replace(/^(?:que|de|a|para|y|,)\s+/i,'');
+ t=t.replace(/[\s,;.:]+$/,'');
+ for(let i=0;i<3;i++)t=t.replace(/\s+(?:a|el|la|los|las|de|del|para|y|en|que|por|este|esta)$/i,'');
+ t=t.trim();return t.charAt(0).toUpperCase()+t.slice(1);
+}
 function addTask(raw,o){
  let txt=raw.trim();if(!txt)return false;
  const tags=[];txt=txt.replace(/(^|\s)#([\p{L}\d_-]+)/gu,(m,a,w)=>{tags.push(w);return a}).trim();
- let due=o.due||'',time='';
- {const P=[/\s+a las?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?:\s+de la\s+(tarde|noche|mañana|madrugada))?$/i,/\s+(\d{1,2}):(\d{2})\s*(am|pm)?$/i,/\s+(\d{1,2})\s*(am|pm)$/i];
-  for(let i=0;i<3&&!time;i++){const m=txt.match(P[i]);if(!m)continue;
-   let h=+m[1];const mi=i<2?+(m[2]||0):0,mer=((i===0?(m[3]||m[4]):i===1?m[3]:m[2])||'').toLowerCase();
-   if(/pm|tarde|noche/.test(mer)&&h<12)h+=12;else if(/^(am|mañana|madrugada)$/.test(mer)&&h===12)h=0;
-   if(h<24&&mi<60){time=pad(h)+':'+pad(mi);txt=txt.slice(0,m.index).trim()}}}
- if(/\s(hoy)$/i.test(txt)){due=today();txt=txt.replace(/\s+hoy$/i,'')}
- else if(/\s(mañana)$/i.test(txt)){due=addDays(today(),1);txt=txt.replace(/\s+mañana$/i,'')}
- txt=txt.trim();if(!txt)return false;
- if(time&&!due)due=today();
+ const nl=parseNL(txt,o.due||'');
+ txt=cleanTitle(nl.txt);
+ if(!txt&&nl.fromText)txt='Recordatorio';
+ if(!txt)return false;
+ const due=nl.due,time=nl.time;
+ LASTNL=nl.fromText?{rel:nl.rel}:null;
  const x={id:uid(),t:txt,notes:'',list:o.list||'inbox',tags,p:+o.p||0,due,rep:'',done:false,doneAt:null,subs:[],pomos:0,est:0,spentS:0,time,rem:time?0:-1,remDone:false,snz:0};
  if(time){armRem(x);askNotif()}
  S.tasks.push(x);save();return x;
@@ -265,7 +338,7 @@ function renderTasks(){
  const defDue=v==='hoy'?today():v==='man'?addDays(today(),1):'';
  const inList=v.startsWith('list:');
  let h=`<div class="pad"><div class="hd"><button class="g menu" data-act="drawer">${ic('menu')}</button><h1>${esc(title)}</h1>${inList&&v!=='list:inbox'?`<button class="g" data-act="dellist" data-id="${v.slice(5)}">Eliminar lista</button>`:''}</div>
- <div class="addbar">${ic('plus',18)}<input id="nt" placeholder="Añadir tarea a «${esc(inList?listOf(defList).name:'Bandeja')}», pulsa Enter" data-l="${defList}">
+ <div class="addbar">${ic('plus',18)}<input id="nt" placeholder="Ej: tengo que enviar un archivo en 10 minutos" data-l="${defList}">
  <input id="nd" type="date" value="${defDue}" title="Fecha"><select id="np" title="Prioridad"><option value="0">Prioridad</option><option value="3">Alta</option><option value="2">Media</option><option value="1">Baja</option></select>${SR?'<button class="o" data-act="mic" data-for="nt" title="Dictar tarea por voz">🎤</button>':''}<button data-act="go" data-for="nt">Añadir</button></div>`;
  if(!open.length&&!done.length)h+=`<div class="empty"><b>✓</b>Nada por aquí. Añade tu primera tarea.</div>`;
  if(v==='prox'||v==='hoy'||v==='man'||true)groups(open).forEach(g=>{
@@ -432,6 +505,25 @@ function showRemCard(x){
  box.appendChild(c);
 }
 function remClose(id){const c=document.querySelector(`.remc[data-id="${id}"]`);if(c)c.remove()}
+// Alarma del reloj de Android: abre un temporizador ya puesto (suena aunque Enfoque esté cerrada)
+const ANDROID=/Android/i.test(navigator.userAgent||'');
+function clockSecs(x){
+ if(!x||!x.due||!x.time)return 0;
+ const d=pd(x.due),[h,m]=x.time.split(':').map(Number);d.setHours(h,m,0,0);
+ const s=Math.round((d.getTime()-(Math.max(0,x.rem??0))*60000-Date.now())/1000);
+ return s>=5&&s<=86400?s:0;
+}
+function clockUrl(x){const s=clockSecs(x);return s?'intent:#Intent;action=android.intent.action.SET_TIMER;i.android.intent.extra.alarm.LENGTH='+s+';S.android.intent.extra.alarm.MESSAGE='+encodeURIComponent(x.t)+';B.android.intent.extra.alarm.SKIP_UI=false;end':''}
+// Confirma lo que la app entendió, para que puedas corregirlo o deshacerlo
+function showUnderstood(x,rel){
+ let box=$('#rem');if(!box){box=document.createElement('div');box.id='rem';document.body.appendChild(box)}
+ const key='u'+x.id;remClose(key);
+ const when=(x.due?label(x.due):'')+(x.time?' a las '+x.time:'')+(rel?' ('+rel+')':'');
+ const c=document.createElement('div');c.className='remc';c.dataset.id=key;
+ c.innerHTML=`<b>Entendido ✓</b><small>«${esc(x.t)}» · ${esc(when)}${x.time?' · 🔔 te aviso':''}</small>
+ <div class="row" style="margin-top:8px">${ANDROID&&clockSecs(x)?`<button data-act="clk" data-id="${x.id}">⏰ Alarma del reloj</button>`:''}<button class="o" data-act="remundo" data-id="${x.id}">Deshacer</button><button class="g" data-act="remx" data-id="${key}">OK</button></div>`;
+ box.appendChild(c);setTimeout(()=>remClose(key),x.time?15000:6000);
+}
 // Calendario (.ics): el aviso lo da el calendario del teléfono, aunque Enfoque esté cerrada
 function icsEsc(s){return String(s||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n')}
 function icsDT(d){return d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'T'+pad(d.getHours())+pad(d.getMinutes())+'00'}
@@ -459,9 +551,11 @@ function mic(btn,forId){
  rec=new SR();rec.lang=/^es/i.test(navigator.language||'')?navigator.language:'es-ES';rec.interimResults=true;rec.continuous=false;
  const off=()=>{rec=null;btn.textContent='🎤';btn.classList.remove('rec')};
  btn.textContent='■';btn.classList.add('rec');
- rec.onresult=e=>{let t='';for(const r of e.results)t+=r[0].transcript;t=t.trim();inp.value=t.charAt(0).toUpperCase()+t.slice(1)};
- rec.onerror=e=>{off();if(e.error==='not-allowed'||e.error==='service-not-allowed')alert('Permite el micrófono para poder dictar.')};
- rec.onend=()=>{off();inp.focus()};
+ let got=false;
+ rec.onresult=e=>{let t='';for(const r of e.results)t+=r[0].transcript;t=t.trim();if(t)got=true;inp.value=t.charAt(0).toUpperCase()+t.slice(1)};
+ rec.onerror=e=>{got=false;off();if(e.error==='not-allowed'||e.error==='service-not-allowed')alert('Permite el micrófono para poder dictar.')};
+ // al terminar de hablar, la tarea se agrega sola (con «Deshacer» si entendió mal)
+ rec.onend=()=>{off();inp.focus();if(got&&inp.value.trim())setTimeout(()=>inp.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})),150)};
  try{rec.start()}catch(err){off()}
 }
 
@@ -478,7 +572,7 @@ function detailHTML(x,modal){
  <div class="addbar" style="margin:8px 0 0">${ic('plus',16)}<input id="sn" placeholder="Añadir subtarea" style="padding:7px 4px"><button class="o" data-act="go" data-for="sn">＋</button></div>
  <div class="df" style="margin-top:12px"><span style="color:var(--mu)">⏰ Hora</span><input id="eh" type="time" value="${x.time||''}" style="flex:none;width:118px;min-width:0">
  <select id="eb" ${x.time?'':'disabled'} title="Cuándo avisarte" style="flex:1;min-width:120px;max-width:none">${[[-1,'Sin recordatorio'],[0,'A la hora'],[5,'5 min antes'],[10,'10 min antes'],[30,'30 min antes'],[60,'1 hora antes'],[1440,'1 día antes']].map(([k,n])=>`<option value="${k}" ${k===(x.rem??-1)?'selected':''}>${n}</option>`).join('')}</select>
- <button class="o" data-act="ics" title="Añadir a Google Calendar o al calendario del teléfono (suena aunque la app esté cerrada)">📅 Calendario</button></div>
+ ${ANDROID?'<button class="o" data-act="clk" title="Poner un temporizador en el reloj del teléfono (suena aunque la app esté cerrada)">⏰ Reloj</button>':''}<button class="o" data-act="ics" title="Añadir a Google Calendar o al calendario del teléfono (suena aunque la app esté cerrada)">📅 Calendario</button></div>
  <div class="df" style="margin-top:12px"><span style="color:var(--mu)">⏱ Estimado</span><input id="ee" type="number" min="0" step="5" value="${x.est||''}" placeholder="min" style="flex:none;width:80px;min-width:0">
  <span style="color:var(--mu)">Real: <b id="rt" data-id="${x.id}" style="color:var(--tx)">${fmtD(spentNow(x))}</b></span>
  <button class="${S.timer&&S.timer.id===x.id?'d':'o'}" data-act="tstart">${S.timer&&S.timer.id===x.id?'■ Detener':'▶ Cronómetro'}</button></div>
@@ -520,7 +614,7 @@ function settings(){
  <p style="color:var(--mu);font-size:12px;margin-top:6px">Los avisos suenan con Enfoque abierta o en segundo plano. Para que te avisen con la app cerrada, usa «Calendario»: el aviso lo da el calendario de tu teléfono.</p>
  <label class="l">Copia de seguridad</label><div class="row"><button class="o" data-act="export">Exportar</button><button class="o" data-act="import">Importar</button></div>
  <input type="file" id="imp" accept=".json" style="display:none">
- <p style="color:var(--mu);font-size:11px;margin-top:14px">Versión 8 · recordatorios con hora</p>
+ <p style="color:var(--mu);font-size:11px;margin-top:14px">Versión 9 · entiende frases como «en 10 minutos»</p>
  <div class="row" style="justify-content:flex-end;margin-top:16px"><button data-act="close">Cerrar</button></div></div>`;
  $('#modal').classList.add('on');
 }
@@ -564,6 +658,8 @@ document.addEventListener('click',e=>{
  else if(a==='remdone'){const x=S.tasks.find(z=>z.id===id);if(x&&!x.done){toggle(x);sfx('done');save();render()}remClose(id)}
  else if(a==='remsnz'){const x=S.tasks.find(z=>z.id===id);if(x){x.snz=Date.now()+10*60000;x.remDone=false;save();toast('Te aviso de nuevo en 10 minutos')}remClose(id)}
  else if(a==='remx')remClose(id);
+ else if(a==='remundo'){S.tasks=S.tasks.filter(z=>z.id!==id);if(S.timer&&S.timer.id===id)S.timer=null;save();remClose('u'+id);ui.sel=ui.sel===id?null:ui.sel;render();toast('Tarea eliminada')}
+ else if(a==='clk'){const x=S.tasks.find(z=>z.id===(id||curId()));const u=clockUrl(x);if(u)location.href=u;else toast('La alarma del reloj solo sirve para las próximas 24 horas')}
  else if(a==='mic')mic(el,el.dataset.for);
  else if(a==='tpledit')tplEdit(id);
  else if(a==='tpluse')tplUse(id);
@@ -607,8 +703,8 @@ document.addEventListener('change',e=>{
 document.addEventListener('keydown',e=>{
  const id=e.target.id;
  if(e.key==='Enter'||e.keyCode===13){
-  if(id==='nt'){const x=addTask(e.target.value,{list:e.target.dataset.l,p:$('#np').value,due:$('#nd').value});if(x){sfx('add');ui.collapsed={};render();$('#nt').focus()}}
-  else if(id==='cn'){if(addTask(e.target.value,{due:ui.cal.sel})){render();$('#cn').focus()}}
+  if(id==='nt'){const x=addTask(e.target.value,{list:e.target.dataset.l,p:$('#np').value,due:$('#nd').value});if(x){sfx('add');ui.collapsed={};render();$('#nt').focus();if(LASTNL)showUnderstood(x,LASTNL.rel)}}
+  else if(id==='cn'){const x=addTask(e.target.value,{due:ui.cal.sel});if(x){render();$('#cn').focus();if(LASTNL)showUnderstood(x,LASTNL.rel)}}
   else if(id==='hn'){const t=e.target.value.trim();if(t){S.habits.push({id:uid(),t,days:[]});save();renderMain();$('#hn').focus()}}
   else if(id==='sn'){const x=S.tasks.find(z=>z.id===curId()),v=e.target.value.trim();if(x&&v){x.subs.push({t:v,done:false});save();refreshDetail();$('#sn').focus()}}
   else if(id==='et')e.target.blur();
@@ -677,7 +773,7 @@ addEventListener('resize',()=>{const w=wide();if(w!==lastWide){lastWide=w;render
 function toast(m){let t=$('#toast');if(!t){t=document.createElement('div');t.id='toast';document.body.appendChild(t)}t.textContent=m;t.className='toast on';clearTimeout(toast.h);toast.h=setTimeout(()=>{t.className='toast'},2800)}
 setInterval(()=>{const e=$('#rt');if(e){const x=S.tasks.find(z=>z.id===e.dataset.id);if(x)e.textContent=fmtD(spentNow(x))}},1000);
 if(S.timer&&!S.tasks.some(z=>z.id===S.timer.id))S.timer=null;
-setInterval(checkRem,15000);
+setInterval(checkRem,10000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkRem()});
 setTimeout(checkRem,800);
 if(navigator.serviceWorker)navigator.serviceWorker.addEventListener('message',e=>{const id=e.data&&e.data.open;if(id&&S.tasks.some(z=>z.id===id)){ui.view=ui.lastTV='todas';ui.sel=id;render();openTask(id)}});
