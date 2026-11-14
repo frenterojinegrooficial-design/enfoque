@@ -387,8 +387,10 @@ function settings(){
  $('#modal').innerHTML=`<div class="box"><h1 style="font-size:18px;margin-bottom:12px">Ajustes</h1>
  <label class="l">Tema</label><div class="row">${[['auto','Automático'],['light','Claro'],['dark','Oscuro']].map(([k,n])=>`<button class="${S.theme===k?'':'o'}" data-act="theme" data-k="${k}">${n}</button>`).join('')}</div>
  <label class="l">Sonidos al completar y añadir tareas</label><div class="row"><button class="${S.cfg.sfx===false?'o':''}" data-act="sfx" data-k="on">Activados</button><button class="${S.cfg.sfx===false?'':'o'}" data-act="sfx" data-k="off">Silenciados</button></div>
+ <div class="row" style="margin-top:8px"><button class="o" data-act="sfxtest">Probar sonido</button></div>
  <label class="l">Copia de seguridad</label><div class="row"><button class="o" data-act="export">Exportar</button><button class="o" data-act="import">Importar</button></div>
  <input type="file" id="imp" accept=".json" style="display:none">
+ <p style="color:var(--mu);font-size:11px;margin-top:14px">Versión 6 · sonidos con audio normal</p>
  <div class="row" style="justify-content:flex-end;margin-top:16px"><button data-act="close">Cerrar</button></div></div>`;
  $('#modal').classList.add('on');
 }
@@ -406,6 +408,7 @@ document.addEventListener('click',e=>{
  else if(a==='drawer'){ui.drawer=!ui.drawer;renderSide()}
  else if(a==='chk'){const t=task(),was=t.done;toggle(t);if(!was)sfx('done');save();if(ui.edit)refreshDetail();else render()}
  else if(a==='sfx'){S.cfg.sfx=el.dataset.k==='on';save();if(S.cfg.sfx)sfx('done');settings()}
+ else if(a==='sfxtest'){const old=S.cfg.sfx;S.cfg.sfx=true;sfx('done');S.cfg.sfx=old}
  else if(a==='open')openTask(id);
  else if(a==='grp'){const g=el.dataset.g;ui.collapsed[g]=!ui.collapsed[g];renderMain()}
  else if(a==='showdone'){ui.showDone=!ui.showDone;renderMain()}
@@ -498,18 +501,28 @@ function playSound(k){
  src.start();SND.nodes=nodes;SND.cur=k;
 }
 // efectos cortos: "ding" al completar, "pop" al añadir
+// Se generan como archivos WAV y se reproducen con <audio>: suenan también en iPhone con el interruptor de silencio.
+function wavUrl(a,rate){
+ const n=a.length,b=new ArrayBuffer(44+n*2),v=new DataView(b);
+ const w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i))};
+ w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+ v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
+ for(let i=0;i<n;i++)v.setInt16(44+i*2,Math.max(-1,Math.min(1,a[i]))*32767,true);
+ return URL.createObjectURL(new Blob([b],{type:'audio/wav'}));
+}
+function tone(notes,dur){
+ const rate=22050,n=Math.floor(rate*dur),a=new Float32Array(n);
+ notes.forEach(([f,t])=>{const s=Math.floor(t*rate);for(let i=s;i<n;i++){const x=(i-s)/rate;if(x>.5)break;const env=Math.min(1,x/.006)*Math.exp(-x*6);a[i]+=Math.sin(2*Math.PI*f*x)*env*.6+Math.sin(2*Math.PI*f*2*x)*env*.15}});
+ return wavUrl(a,rate);
+}
+const SFX={};
 function sfx(k){
  if(S.cfg.sfx===false)return;
- const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
- if(!SND.ctx)SND.ctx=new AC();
- const c=SND.ctx;if(c.resume)c.resume();
- const notes=k==='done'?[[659.25,0],[880,.09],[1318.5,.18]]:[[523.25,0]];
- notes.forEach(([f,t])=>{
-  const o=c.createOscillator(),g=c.createGain(),s=c.currentTime+t;
-  o.type='sine';o.frequency.value=f;
-  g.gain.setValueAtTime(0,s);g.gain.linearRampToValueAtTime(.18,s+.01);g.gain.exponentialRampToValueAtTime(.001,s+.35);
-  o.connect(g);g.connect(c.destination);o.start(s);o.stop(s+.4);
- });
+ try{
+  if(!SFX.done){SFX.done=new Audio(tone([[659.25,0],[880,.1],[1318.5,.2]],.75));SFX.add=new Audio(tone([[587.33,0],[783.99,.07]],.45))}
+  const a=SFX[k];a.volume=1;a.currentTime=0;const p=a.play();if(p&&p.catch)p.catch(()=>{});
+ }catch(e){}
+ if(k==='done'&&navigator.vibrate)navigator.vibrate(35);
 }
 let lastWide=wide();
 addEventListener('resize',()=>{const w=wide();if(w!==lastWide){lastWide=w;renderMain();renderDetail()}});
