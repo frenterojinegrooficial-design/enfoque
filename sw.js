@@ -1,12 +1,21 @@
-const C = 'enfoque-v5';
+const C = 'enfoque-v6';
 const F = ['./', './index.html', './manifest.json', './icon.svg'];
+const CDN = ['cdn.jsdelivr.net', 'cdnjs.cloudflare.com']; // motor de la voz natural: se guarda para usarlo sin internet
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(C).then(c => c.addAll(F.map(u => new Request(u, { cache: 'reload' }))))); });
 self.addEventListener('activate', e => e.waitUntil(
   caches.keys().then(k => Promise.all(k.filter(x => x !== C).map(x => caches.delete(x)))).then(() => self.clients.claim())
 ));
-// Red primero y sin usar la caché del navegador (siempre la versión más nueva); si no hay internet, usa la copia guardada.
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
+  const u = new URL(e.request.url);
+  if (u.origin !== self.location.origin) {
+    // Librerías de la voz: primero la copia guardada, y si no hay, de internet (y se guarda).
+    if (CDN.includes(u.hostname)) {
+      e.respondWith(caches.open(C).then(c => c.match(e.request).then(m => m || fetch(e.request).then(r => { if (r.ok) c.put(e.request, r.clone()); return r }))));
+    }
+    return; // cualquier otro sitio (p. ej. el modelo de 114 MB en Hugging Face) no se toca
+  }
+  // La app: red primero y sin usar la caché del navegador (siempre la versión más nueva); sin internet, la copia guardada.
   e.respondWith(
     fetch(new Request(e.request, { cache: 'no-store' }))
       .then(r => { const cp = r.clone(); caches.open(C).then(c => c.put(e.request, cp)); return r; })
