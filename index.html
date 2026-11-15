@@ -265,7 +265,7 @@ function parseNL(txt,dueIn){
 }
 // Quita «tengo que», «recuérdame», «necesito»... y deja el título limpio
 function cleanTitle(t){
- t=t.replace(/^(?:(?:por favor|oye|hey|ok|bueno)[, ]+)?(?:recu[eé]rdame(?: que| de)?|recordarme(?: que| de)?|recordar(?: que| de)?|av[ií]same(?: que| de| cuando)?|ac[uú]erdame(?: de| que)?|no (?:olvides|olvidar)(?: de| que)?|tengo que|tienes que|debo|debería|necesito|hay que|me toca|quiero|voy a)\s+/i,'');
+ t=t.replace(/^(?:(?:por favor|oye|hey|ok|bueno)[, ]+)?(?:(?:a[ñn]ade|agrega|crea|anota|apunta)(?:me)?(?:\s+(?:una|la))?(?:\s+(?:tarea|recordatorio|nota))?(?:\s+(?:de|para|que))?|recu[eé]rdame(?: que| de)?|recordarme(?: que| de)?|recordar(?: que| de)?|av[ií]same(?: que| de| cuando)?|ac[uú]erdame(?: de| que)?|no (?:olvides|olvidar)(?: de| que)?|tengo que|tienes que|debo|debería|necesito|hay que|me toca|quiero|voy a)\s+/i,'');
  for(let i=0;i<3;i++)t=t.replace(/^(?:que|de|a|para|y|,)\s+/i,'');
  t=t.replace(/[\s,;.:]+$/,'');
  for(let i=0;i<3;i++)t=t.replace(/\s+(?:a|el|la|los|las|de|del|para|y|en|que|por|este|esta)$/i,'');
@@ -569,6 +569,111 @@ function icsDownload(list,name){
  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([icsFor(list)],{type:'text/calendar'}));a.download=name;document.body.appendChild(a);a.click();a.remove();
 }
 
+// ---------- comandos (hablados o escritos): «qué tengo hoy», «marca como hecha la luz», «pospón la reunión una hora»
+const UNDO={};
+const norm=s=>String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9ñ ]/g,' ').replace(/\s+/g,' ').trim();
+const STOP=new Set('de del la el los las un una unos unas que para por con en a y o al lo mi mis tarea tareas recordatorio como hecha hecho'.split(' '));
+function findTask(query){
+ const qw=norm(query).split(' ').filter(w=>w.length>2&&!STOP.has(w));
+ if(!qw.length)return null;
+ let best=null,bs=0;
+ S.tasks.filter(t=>!t.done).forEach(t=>{
+  const tw=norm(t.t).split(' ');let s=0;
+  qw.forEach(w=>{if(tw.some(x=>x===w||(x.length>3&&w.length>3&&(x.startsWith(w)||w.startsWith(x)))))s++});
+  s/=qw.length;
+  if(s>bs||(s===bs&&best&&sortT(t,best)<0)){bs=s;best=t}
+ });
+ return bs>=0.6?best:null;
+}
+function qTasks(p){
+ const t=today(),open=S.tasks.filter(x=>!x.done);
+ const l=p==='mañana'?open.filter(x=>x.due===addDays(t,1)):p==='semana'?open.filter(x=>x.due&&x.due>=t&&x.due<=addDays(t,7)):p==='todas'?open:open.filter(x=>x.due&&x.due<=t);
+ return l.sort(sortT);
+}
+function cmdCard(msg,subHtml,undo,ms){
+ let box=$('#rem');if(!box){box=document.createElement('div');box.id='rem';document.body.appendChild(box)}
+ const k=uid();if(undo)UNDO[k]=undo;
+ const c=document.createElement('div');c.className='remc';c.dataset.id='c'+k;
+ c.innerHTML=`<b>${esc(msg)}</b>${subHtml?`<small>${subHtml}</small>`:''}<div class="row" style="margin-top:8px">${undo?`<button class="o" data-act="undocmd" data-id="${k}">Deshacer</button>`:''}<button class="g" data-act="remx" data-id="c${k}">OK</button></div>`;
+ box.appendChild(c);setTimeout(()=>{remClose('c'+k);delete UNDO[k]},ms||9000);
+}
+const mayTalk=via=>{const m=talkMode();return m==='all'||(m==='mic'&&via)};
+const whenSpoken=t=>(t.due?hablaFecha(t.due):'')+(t.time?' a '+hablaHora(t.time):'');
+const whenCard=t=>(t.due?label(t.due):'')+(t.time?' '+t.time:'');
+const snapT=t=>({due:t.due,time:t.time,rem:t.rem,remDone:t.remDone,snz:t.snz});
+const restoreT=(t,p)=>{Object.assign(t,p)};
+const cutArt=s=>s.replace(/^(?:la tarea\s+(?:de\s+|del\s+)?|el\s+|la\s+|lo\s+de\s+|lo\s+)/,'').trim();
+function notFound(q,via){
+ cmdCard('No encontré una tarea parecida a «'+q+'»','',null,7000);
+ if(mayTalk(via))speak('No encontré una tarea que se parezca a '+q+'.');
+ return true;
+}
+function cmdDone(q,via,explicit){
+ const t=findTask(cutArt(q));if(!t)return explicit?notFound(cutArt(q),via):false;
+ const n=S.tasks.length;toggle(t);const spawned=S.tasks.length>n?S.tasks[S.tasks.length-1]:null;
+ sfx('done');save();render();
+ cmdCard('✓ Hecha: '+t.t,'',()=>{t.done=false;t.doneAt=null;if(spawned)S.tasks=S.tasks.filter(z=>z!==spawned)});
+ if(mayTalk(via))speak('Listo, marqué como hecha '+t.t+'.');
+ return true;
+}
+function cmdPostpone(rest,via,clear){
+ rest=cutArt(rest);
+ const DELTA=/\b(?:por\s+|otr[oa]s?\s+|unos?\s+|unas?\s+)?(media hora|(\d+|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|quince|veinte|treinta|cuarenta|cincuenta|sesenta)\s*(minutos?|mins?|horas?|hrs?|h|d[ií]as?|semanas?))(?![\p{L}\d])/iu;
+ const ABS=/\b(para|hasta|a las?|dentro de|ma[ñn]ana|hoy|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|esta noche|esta tarde)\b/i;
+ const dm=rest.match(DELTA);let t,prev;
+ if(dm&&!ABS.test(rest)){
+  let min=0,days=0;const g=dm[1].toLowerCase();
+  if(g==='media hora')min=30;else{const n=numOf(dm[2]),u=dm[3].toLowerCase();if(u.startsWith('min'))min=n;else if(u[0]==='h')min=n*60;else if(u[0]==='d')days=n;else days=n*7}
+  const qq=(rest.slice(0,dm.index)+' '+rest.slice(dm.index+dm[0].length)).replace(/\s+/g,' ').trim();
+  t=findTask(qq);if(!t)return clear?notFound(qq,via):false;
+  prev=snapT(t);
+  if(days){t.due=addDays(t.due||today(),Math.round(days))}
+  else{
+   let base=Date.now();
+   if(t.due&&t.time){const d=pd(t.due),[h,m]=t.time.split(':').map(Number);d.setHours(h,m,0,0);base=Math.max(base,d.getTime())}
+   const d2=new Date(Math.round((base+min*60000)/60000)*60000);t.due=ds(d2);t.time=pad(d2.getHours())+':'+pad(d2.getMinutes());
+  }
+ }else{
+  const nl=parseNL(rest,'');if(!nl.fromText)return false;
+  t=findTask(nl.txt);if(!t)return clear?notFound(nl.txt,via):false;
+  prev=snapT(t);t.due=nl.due;if(nl.time)t.time=nl.time;
+ }
+ if(t.time&&(t.rem==null||t.rem<0))t.rem=0;
+ armRem(t);save();render();
+ cmdCard('Pospuse «'+t.t+'»','Ahora: '+esc(whenCard(t)),()=>{restoreT(t,prev)});
+ if(mayTalk(via))speak('Listo, pospuse '+t.t+' para '+whenSpoken(t)+'.');
+ return true;
+}
+function runCommand(raw,via){
+ const c=raw.trim().replace(/[¿?¡!]+/g,'').replace(/^(?:(?:oye|hey|ok|bueno|por favor|a ver|jarvis|enfoque)[, ]+)+/i,'').replace(/[.,;]+$/,'').trim();
+ const lc=c.toLowerCase();if(!lc)return false;
+ // consultas
+ if((/^(?:qu[eé]|cu[aá]les?|cu[aá]ntas?|dime|mu[eé]strame|l[eé]eme)(?=\s|$)/.test(lc)&&/\b(tengo|hay|tareas|pendientes?|queda|quedan|agenda)\b/.test(lc))||/^(?:mi agenda|resumen)\s+(?:del d[ií]a|de hoy|de ma[ñn]ana|de la semana)$/.test(lc)){
+  const p=/ma[ñn]ana/.test(lc)?'mañana':/semana|pr[oó]ximos/.test(lc)?'semana':(/pendientes?|todas|cu[aá]ntas/.test(lc)&&!/\bhoy\b/.test(lc))?'todas':'hoy';
+  const L=qTasks(p),t0=today(),nom={hoy:'Hoy',mañana:'Para mañana',semana:'Esta semana',todas:'En total'}[p];
+  if(!L.length){const s={hoy:'Hoy no tienes nada pendiente.',mañana:'Para mañana no tienes nada.',semana:'Esta semana no tienes nada.',todas:'No tienes tareas pendientes.'}[p];cmdCard(s,'',null,6000);if(mayTalk(via))speak(s);return true}
+  const sp=L.slice(0,5).map(x=>x.t+(x.time&&p!=='todas'?' a '+hablaHora(x.time):'')),extra=L.length-5;
+  let s=nom+' tienes '+(L.length===1?'1 tarea':L.length+' tareas')+': '+(sp.length>1?sp.slice(0,-1).join(', ')+' y '+sp[sp.length-1]:sp[0])+(extra>0?', y '+extra+' más':'')+'.';
+  const late=p==='hoy'?L.filter(x=>x.due<t0).length:0;if(late)s+=late===1?' Una está vencida.':' '+late+' están vencidas.';
+  cmdCard(nom+': '+L.length+(L.length===1?' tarea':' tareas'),'<ol style="margin:4px 0 0 18px;padding:0">'+L.slice(0,8).map(x=>`<li>${esc(x.t)}${x.time?' · '+x.time:''}${x.due&&x.due<t0?' · vencida':''}</li>`).join('')+'</ol>',null,15000);
+  if(mayTalk(via))speak(s);return true;
+ }
+ let m=lc.match(/^(?:marca|marcar|m[aá]rcame|tacha|tachar|completa|completar)\s+(.+)$/);
+ if(m&&!(/^completa/.test(lc)&&!/\b(como|tarea)\b/.test(m[1])))return cmdDone(m[1].replace(/\bcomo\s+(?:hecha|hecho|completada|completado|terminada|terminado|lista|listo)\b/g,' ').replace(/\s+/g,' '),via,/\b(como|tarea|hecha|hecho|completada|terminada)\b/.test(m[1]));
+ m=lc.match(/^ya\s+(?:hice|termin[eé]|envi[eé]|pagu[eé]|llam[eé]|compr[eé]|mand[eé]|revis[eé]|entregu[eé])\s+(.+)$/);
+ if(m)return cmdDone(m[1],via,true);
+ m=lc.match(/^(?:posp[oó]n(?:me)?|pospone|posponer|aplaza(?:r)?|retrasa(?:r)?|atrasa(?:r)?|mueve|mover|cambia|cambiar|pasa|pasar)\s+(.+)$/);
+ if(m)return cmdPostpone(m[1],via,/^(?:posp|aplaz|retras|atras)/.test(lc));
+ m=lc.match(/^(?:borra|borrar|b[oó]rrame|elimina|eliminar)\s+(.+)$/);
+ if(m){
+  const t=findTask(cutArt(m[1]));if(!t)return /\btarea\b/.test(m[1])?notFound(cutArt(m[1]),via):false;
+  S.tasks=S.tasks.filter(z=>z!==t);if(S.timer&&S.timer.id===t.id)S.timer=null;save();render();
+  cmdCard('Eliminé «'+t.t+'»','',()=>{S.tasks.push(t)});
+  if(mayTalk(via))speak('Listo, eliminé '+t.t+'.');return true;
+ }
+ return false;
+}
+
 // ---------- dictado por voz
 let rec=null;
 function mic(btn,forId){
@@ -637,6 +742,13 @@ function settings(){
  <label class="l">Respuestas por voz (la voz de tu teléfono)</label>
  <div class="row">${[['mic','Al dictar'],['all','Siempre'],['off','Silencio']].map(([k,n])=>`<button class="${talkMode()===k?'':'o'}" data-act="talk" data-k="${k}">${n}</button>`).join('')}<button class="o" data-act="talktest">Probar voz</button></div>
  <p style="color:var(--mu);font-size:12px;margin-top:6px">«Al dictar»: te contesta cuando creas la tarea con el micrófono. Los recordatorios también se anuncian en voz alta, salvo en «Silencio».</p>
+ <details style="margin-top:8px"><summary style="cursor:pointer;color:var(--ac)">Comandos que entiende (hablados o escritos)</summary>
+ <ul style="color:var(--mu);font-size:12px;padding-left:18px;margin-top:6px;line-height:1.6">
+ <li>«¿Qué tengo hoy?», «¿qué tengo mañana?», «¿qué tengo esta semana?», «¿cuántas tareas tengo?»</li>
+ <li>«Marca como hecha la tarea de la luz», «ya envié el archivo»</li>
+ <li>«Pospón la reunión una hora», «pospón llamar a Juan para mañana a las 9»</li>
+ <li>«Borra la tarea de Juan»</li>
+ <li>Todo lo demás se crea como tarea: «tengo que enviar un archivo en 10 minutos»</li></ul></details>
  <label class="l">Sonidos al completar y añadir tareas</label><div class="row"><button class="${S.cfg.sfx===false?'o':''}" data-act="sfx" data-k="on">Activados</button><button class="${S.cfg.sfx===false?'':'o'}" data-act="sfx" data-k="off">Silenciados</button></div>
  <div class="row" style="margin-top:8px"><button class="o" data-act="sfxtest">Probar sonido</button></div>
  <label class="l">Avisos de recordatorios: ${!('Notification' in window)?'no disponibles en este navegador':{granted:'activados',denied:'bloqueados (actívalos en los ajustes del sitio del navegador)',default:'sin activar'}[Notification.permission]}</label>
@@ -644,7 +756,7 @@ function settings(){
  <p style="color:var(--mu);font-size:12px;margin-top:6px">Los avisos suenan con Enfoque abierta o en segundo plano. Para que te avisen con la app cerrada, usa «Calendario»: el aviso lo da el calendario de tu teléfono.</p>
  <label class="l">Copia de seguridad</label><div class="row"><button class="o" data-act="export">Exportar</button><button class="o" data-act="import">Importar</button></div>
  <input type="file" id="imp" accept=".json" style="display:none">
- <p style="color:var(--mu);font-size:11px;margin-top:14px">Versión 10 · te contesta con voz</p>
+ <p style="color:var(--mu);font-size:11px;margin-top:14px">Versión 11 · comandos por voz</p>
  <div class="row" style="justify-content:flex-end;margin-top:16px"><button data-act="close">Cerrar</button></div></div>`;
  $('#modal').classList.add('on');
 }
@@ -689,6 +801,7 @@ document.addEventListener('click',e=>{
  else if(a==='remsnz'){const x=S.tasks.find(z=>z.id===id);if(x){x.snz=Date.now()+10*60000;x.remDone=false;save();toast('Te aviso de nuevo en 10 minutos')}remClose(id)}
  else if(a==='talk'){S.cfg.talk=el.dataset.k;save();settings();if(S.cfg.talk!=='off')speak('Listo, así te voy a contestar.')}
  else if(a==='talktest'){if(!('speechSynthesis' in window))toast('Este navegador no tiene voz');else speak('Hola, soy Enfoque. Listo, te aviso a las 6:58 de la tarde para enviar un archivo.')}
+ else if(a==='undocmd'){const f=UNDO[id];if(f){f();delete UNDO[id];save();render()}remClose('c'+id)}
  else if(a==='remx')remClose(id);
  else if(a==='remundo'){S.tasks=S.tasks.filter(z=>z.id!==id);if(S.timer&&S.timer.id===id)S.timer=null;save();remClose('u'+id);ui.sel=ui.sel===id?null:ui.sel;render();toast('Tarea eliminada')}
  else if(a==='clk'){const x=S.tasks.find(z=>z.id===(id||curId()));const u=clockUrl(x);if(u)location.href=u;else toast('La alarma del reloj solo sirve para las próximas 24 horas')}
@@ -735,7 +848,7 @@ document.addEventListener('change',e=>{
 document.addEventListener('keydown',e=>{
  const id=e.target.id;
  if(e.key==='Enter'||e.keyCode===13){
-  if(id==='nt'){const x=addTask(e.target.value,{list:e.target.dataset.l,p:$('#np').value,due:$('#nd').value});if(x){sfx('add');ui.collapsed={};render();$('#nt').focus();if(LASTNL)showUnderstood(x,LASTNL.rel);sayConfirm(x,LASTNL?LASTNL.rel:'',VIA);VIA=false}}
+  if(id==='nt'){if(runCommand(e.target.value,VIA)){e.target.value='';VIA=false;return}const x=addTask(e.target.value,{list:e.target.dataset.l,p:$('#np').value,due:$('#nd').value});if(x){sfx('add');ui.collapsed={};render();$('#nt').focus();if(LASTNL)showUnderstood(x,LASTNL.rel);sayConfirm(x,LASTNL?LASTNL.rel:'',VIA);VIA=false}}
   else if(id==='cn'){const x=addTask(e.target.value,{due:ui.cal.sel});if(x){render();$('#cn').focus();if(LASTNL)showUnderstood(x,LASTNL.rel)}}
   else if(id==='hn'){const t=e.target.value.trim();if(t){S.habits.push({id:uid(),t,days:[]});save();renderMain();$('#hn').focus()}}
   else if(id==='sn'){const x=S.tasks.find(z=>z.id===curId()),v=e.target.value.trim();if(x&&v){x.subs.push({t:v,done:false});save();refreshDetail();$('#sn').focus()}}
